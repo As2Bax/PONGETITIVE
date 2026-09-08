@@ -1,0 +1,458 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+:root {
+  --bg: #0a0a12;
+  --fg: #e8f7ff;
+  --accent: #35e0ff;
+  --accent2: #ff4f9a;
+  --dim: #5a6a80;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* slim themed scrollbar — replaces the chunky OS default on small windows */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #2a3350;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: #35e0ff; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Firefox fallback (in case the app folder is ever opened in a browser) */
+* { scrollbar-width: thin; scrollbar-color: #2a3350 transparent; }
+
+html, body {
+  height: 100%;
+  background: radial-gradient(ellipse at center, #11131f 0%, var(--bg) 70%);
+  font-family: 'Press Start 2P', monospace;
+  color: var(--fg);
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-wrapper {
+  position: relative;
+  width: min(96vw, calc(96vh * 900 / 560));
+  aspect-ratio: 900 / 560;
+}
+
+#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 2px solid #1e2537;
+  border-radius: 8px;
+  box-shadow: 0 0 40px rgba(53, 224, 255, 0.12), 0 0 120px rgba(255, 79, 154, 0.06);
+  background: #0b0e18;
+  cursor: default;
+}
+
+/* Spectator tools sit outside the arena, never over the match. */
+body.spectating #game-wrapper {
+  width: min(96vw, calc((96vh - 130px) * 900 / 560));
+  margin-bottom: 130px;
+}
+#game-wrapper {
+  transition: width 300ms ease, margin-bottom 300ms ease;
+}
+body.spectating #game {
+  box-shadow: 0 0 16px rgba(53, 224, 255, 0.1);
+}
+#spectator-panel {
+  position: absolute;
+  top: calc(100% + 24px);
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #62543a;
+  border-top: 3px solid #bfa36b;
+  border-radius: 6px;
+  background: #211e19;
+  box-shadow: none;
+  font-size: 8px;
+}
+#spectator-panel:not([hidden]) {
+  animation: spectator-panel-in 300ms ease-out both;
+}
+@keyframes spectator-panel-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#spectator-panel[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  #game-wrapper { transition: none; }
+  #spectator-panel:not([hidden]) { animation: none; }
+}
+#spawn-choice {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px;
+  color: var(--fg);
+  background: #1a2136;
+  border: 1px solid #3a4666;
+  font: inherit;
+}
+#spawn-status { width: 100%; text-align: center; color: #a5b2c5; line-height: 1.6; }
+
+#spawn-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- overlays ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(8, 9, 16, 0.86);
+  padding: 12px;
+  overflow-y: auto;
+  backdrop-filter: blur(4px);
+  border-radius: 8px;
+  text-align: center;
+  z-index: 10;
+}
+.overlay.visible { display: flex; }
+
+/* Pause covers the whole window, including spectator controls below the arena. */
+#pause {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  border-radius: 0;
+}
+
+.title {
+  font-size: clamp(28px, 5vw, 48px);
+  letter-spacing: 12px;
+  color: var(--fg);
+  text-shadow: 0 0 12px var(--accent), 0 0 40px rgba(53, 224, 255, 0.4);
+}
+.title.small { font-size: clamp(20px, 4vw, 36px); letter-spacing: 6px; }
+
+.subtitle {
+  font-size: clamp(8px, 1.4vw, 12px);
+  color: var(--dim);
+  line-height: 1.8;
+}
+
+.tabs {
+  display: flex;
+  gap: 28px;
+  width: 70%;
+  justify-content: center;
+  border-bottom: 1px solid #2a3350;   /* the divider */
+}
+
+.tab {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 10px 26px 12px;
+  background: transparent;
+  color: var(--dim);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;                /* underline sits on the divider */
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.15s;
+}
+.tab:hover { color: var(--fg); }
+.tab.selected {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  text-shadow: 0 0 10px rgba(53, 224, 255, 0.5);
+}
+
+.tab-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: min(820px, 90%);
+  max-height: 64%;
+  overflow-y: auto;
+  padding: 2px 10px 14px;
+}
+
+/* Play setup has three clear layers: match basics, difficulty details, launch. */
+#tab-play { gap: 18px; }
+#tab-play > .subtitle {
+  max-width: 620px;
+  padding: 0 12px 8px;
+}
+.match-choice {
+  width: 100%;
+  gap: 10px;
+  padding: 13px 16px;
+  border: 1px solid #222c45;
+  border-radius: 6px;
+  background: rgba(18, 24, 39, 0.45);
+}
+#mode-group { border-color: #2a3855; }
+.room-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding-top: 11px;
+  border-top: 1px solid #315849;
+}
+.room-panel[hidden], .room-actions[hidden], .room-join-form[hidden], .room-host-code[hidden] { display: none; }
+.room-actions, .room-join-form {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.room-host-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.room-host-code strong {
+  padding: 10px 15px;
+  color: #7dffb8;
+  border: 1px solid #3d6e5d;
+  border-radius: 4px;
+  letter-spacing: 3px;
+  text-shadow: 0 0 10px rgba(125, 255, 184, 0.35);
+}
+#room-code-input {
+  width: 128px;
+  max-width: 100%;
+  padding: 8px;
+  color: var(--fg);
+  background: #101a22;
+  border: 1px solid #3d6e5d;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 8px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.room-status {
+  min-height: 12px;
+  font-size: 8px;
+  color: #8ba89b;
+  line-height: 1.6;
+}
+.room-permissions {
+  max-width: 500px;
+  font-size: 8px;
+  color: #ffd950;
+  line-height: 1.7;
+}
+#tab-play.pvp-guest-locked > :not(#opponent-group):not(.launch-zone) {
+  opacity: 0.38;
+  filter: saturate(0.3);
+}
+#tab-play.pvp-guest-locked > .launch-zone {
+  opacity: 0.5;
+}
+/* Sticky launch strip has a fade behind it, so scrolling content naturally
+   disappears beneath the action instead of ending in an abrupt hard edge. */
+.launch-zone {
+  position: sticky;
+  bottom: -14px;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 30px 0 14px;
+  margin-top: -12px;
+  background: linear-gradient(to bottom, rgba(8, 9, 16, 0), rgba(8, 9, 16, 0.92) 42%, rgba(8, 9, 16, 1));
+}
+
+.opt:disabled {
+  cursor: default;
+}
+.opt:disabled:hover {
+  color: var(--dim);
+  border-color: #2a3350;
+}
+.opt.toggle:disabled:hover {
+  color: var(--c);
+  border-color: var(--c);
+}
+
+/* Difficulty choices and their settings are one unit: presets show a muted,
+   read-only summary; Custom unlocks the same controls in place. */
+.difficulty-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #344464;
+  border-radius: 8px;
+  padding: 16px 18px 18px;
+  background: linear-gradient(135deg, rgba(21, 29, 48, 0.72), rgba(10, 14, 26, 0.6));
+}
+.difficulty-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 0 14px;
+  border-bottom: 1px solid #344464;
+  width: 100%;
+}
+.difficulty-tabs .opt { padding: 8px 10px; font-size: 8px; }
+.difficulty-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px 22px;
+  width: 100%;
+  transition: opacity 0.18s ease, filter 0.18s ease;
+}
+.difficulty-settings .option-group { width: 100%; gap: 9px; }
+.difficulty-settings .option-group:nth-child(n + 3) { grid-column: 1 / -1; }
+.difficulty-settings .options { gap: 7px; }
+.difficulty-settings .opt { padding: 7px 9px; font-size: 8px; }
+.compact-choice .options { gap: 7px; }
+.compact-choice .opt { padding: 8px 10px; font-size: 8px; }
+@media (max-width: 620px) {
+  .difficulty-settings { grid-template-columns: 1fr; }
+  .difficulty-settings .option-group:nth-child(n + 3) { grid-column: auto; }
+}
+.difficulty-panel.preset-locked .difficulty-settings {
+  opacity: 0.35;
+  filter: saturate(0.35);
+}
+
+/* toggles keep their own accent colour; selected = lit up, unselected = dimmed */
+.opt.toggle {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+.opt.toggle,
+.opt.toggle:hover {
+  color: var(--c);
+  border-color: var(--c);
+}
+.opt.toggle.selected {
+  opacity: 1;
+  filter: none;
+  color: var(--c);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 12px currentColor;
+}
+
+#tab-info { width: 88%; gap: 12px; }
+.info-section {
+  width: 100%;
+  flex-shrink: 0;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid #2a3350;
+  border-radius: 6px;
+  background: rgba(10, 14, 26, 0.5);
+}
+.info-section summary {
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 9px;
+  line-height: 1.8;
+}
+.info-section summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.info-section .controls-hint { margin-top: 12px; color: #a5b2c5; }
+.info-section ul, .info-section ol { padding-left: 22px; }
+.info-section li + li { margin-top: 8px; }
+.info-section strong { color: var(--fg); font-weight: normal; }
+
+.option-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.option-label {
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 3px;
+}
+
+.options { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.opt {
+  /* --c = the button's accent colour; defaults to the global cyan.
+     Colourful buttons (IMPOSSIBLE, CUSTOM, curses…) set --c inline so the
+     selected highlight matches THEIR colour instead of staying blue. */
+  --c: var(--accent);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid #2a3350;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.opt[style*="--c"]:not(.selected) { color: var(--c); border-color: var(--c); }
+.opt:hover { color: var(--fg); border-color: var(--c); }
+.opt.selected {
+  color: var(--bg);
+  background: var(--c);
+  border-color: var(--c);
+  box-shadow: 0 0 14px var(--c);
+}
+
+.big-btn {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 16px 34px;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: 2px;
+  box-shadow: 0 0 18px rgba(53, 224, 255, 0.45);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.big-btn:hover { transform: scale(1.05); box-shadow: 0 0 28px rgba(53, 224, 255, 0.7); }
+.big-btn:active { transform: scale(0.97); }
+
+.big-btn.secondary {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid #2a3350;
+  box-shadow: none;
+}
+.big-btn.secondary:hover { color: var(--fg); border-color: var(--accent); }
+
+.controls-hint {
+  font-size: 8px;
+  color: var(--dim);
+  line-height: 2;
+}
+
+kbd {
+  font-family: inherit;
+  background: #1a2136;
+  border: 1px solid #2a3350;
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: var(--fg);
+}

@@ -1,0 +1,19 @@
+{
+  "name": "pong-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Room server for the browser Pong game (Player vs Player lobbies and relay).",
+  "type": "module",
+  "license": "MIT",
+  "author": "As2Bax",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "check": "node --check server/index.js && node --check server/protocol.js && node --check server/rooms.js && node --check server/validate.js && node --check server/limits.js && node --check server/config.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

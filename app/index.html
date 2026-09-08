@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PONG</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Loading screen: pure inline styles so it renders before the CSS/font arrive -->
+  <div id="loading" style="position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:#0a0a12;font-family:monospace">
+    <div style="font-size:34px;letter-spacing:14px;padding-left:14px;color:#e8f7ff;text-shadow:0 0 14px #35e0ff;font-family:'Press Start 2P',monospace">PONG</div>
+    <canvas id="loading-anim" width="260" height="80" style="width:260px;height:80px;border:2px solid #1e2537"></canvas>
+  </div>
+
+  <div id="game-wrapper">
+    <canvas id="game" width="900" height="560"></canvas>
+
+    <section id="spectator-panel" hidden aria-label="Spectator spawning controls">
+      <label for="spawn-choice">SPAWN</label>
+      <select id="spawn-choice" aria-label="Thing to spawn"></select>
+      <button id="spawn-btn" type="button" class="opt">ADD TO FIELD</button>
+      <span id="spawn-status" role="status">Pick something to add to the match.</span>
+    </section>
+
+    <!-- Main menu overlay -->
+    <div id="menu" class="overlay visible">
+      <h1 class="title">PONG</h1>
+
+      <div class="tabs">
+        <button class="tab selected" data-tab="play">PLAY</button>
+        <button class="tab" data-tab="info">INFO</button>
+      </div>
+
+      <!-- PLAY TAB -->
+      <div class="tab-page" id="tab-play">
+      <p class="subtitle" id="mode-desc">Timed match &mdash; most points when time runs out wins</p>
+
+      <div class="option-group match-choice" id="opponent-group">
+        <span class="option-label">OPPONENT</span>
+        <div class="options" id="opponent-options">
+          <button class="opt selected" data-value="ai">VS AI</button>
+          <button class="opt" data-value="aivai">AI VS AI</button>
+          <button class="opt" data-value="pvp" style="--c:#7dffb8">PLAYER VS PLAYER</button>
+        </div>
+        <div class="room-panel" id="room-panel" hidden>
+          <div class="room-actions" id="room-actions">
+            <button class="opt" id="create-room-btn" type="button">CREATE ROOM</button>
+            <button class="opt" id="show-join-room-btn" type="button">JOIN ROOM</button>
+          </div>
+          <div class="room-join-form" id="room-join-form" hidden>
+            <button class="opt" id="room-back-btn" type="button">BACK</button>
+            <input id="room-code-input" type="text" maxlength="8" autocomplete="off" placeholder="ROOM CODE" aria-label="Room code">
+            <button class="opt" id="join-room-btn" type="button">JOIN</button>
+          </div>
+          <div class="room-host-code" id="room-host-code" hidden>
+            <span class="option-label">ROOM CODE</span>
+            <strong id="room-code-display">------</strong>
+          </div>
+          <div class="room-actions" id="room-leave" hidden>
+            <button class="opt" id="leave-room-btn" type="button">CLOSE ROOM</button>
+          </div>
+          <p class="room-status" id="room-status">CREATE OR JOIN A ROOM</p>
+        </div>
+      </div>
+
+      <div class="option-group match-choice" id="time-group">
+        <span class="option-label">MATCH TIME</span>
+        <div class="options" id="time-options">
+          <button class="opt" data-value="30">0:30</button>
+          <button class="opt selected" data-value="60">1:00</button>
+          <button class="opt" data-value="120">2:00</button>
+          <button class="opt" data-value="180">3:00</button>
+          <button class="opt" data-value="360">6:00</button>
+        </div>
+      </div>
+
+      <div class="option-group match-choice" id="mode-group">
+        <span class="option-label">GAME MODE</span>
+        <div class="options" id="mode-options">
+          <button class="opt selected" data-value="classic">CLASSIC</button>
+          <button class="opt" data-value="survival">SURVIVAL</button>
+          <button class="opt" data-value="endless">ENDLESS</button>
+          <button class="opt" data-value="chaos">CHAOS</button>
+          <button class="opt" data-value="ffa">ROYALE</button>
+        </div>
+      </div>
+
+      <section class="difficulty-panel preset-locked" id="difficulty-panel" aria-label="Difficulty settings">
+        <span class="option-label">DIFFICULTY</span>
+        <div class="difficulty-tabs" id="difficulty-options" role="tablist">
+          <button class="opt" data-value="relaxed" style="--c:#7dffb8">RELAXED</button>
+          <button class="opt" data-value="easy">EASY</button>
+          <button class="opt selected" data-value="normal">NORMAL</button>
+          <button class="opt" data-value="hard">HARD</button>
+          <button class="opt" data-value="insane">INSANE</button>
+          <button class="opt" data-value="impossible" style="--c:#ff3355">IMPOSSIBLE</button>
+          <button class="opt" data-value="custom" style="--c:#ffd950">CUSTOM</button>
+        </div>
+
+        <div class="difficulty-settings" id="difficulty-settings">
+        <div class="option-group compact-choice">
+          <span class="option-label">YOUR PADDLE</span>
+          <div class="options" id="c-paddle-options">
+            <button class="opt" data-value="big">BIG</button>
+            <button class="opt selected" data-value="normal">NORMAL</button>
+            <button class="opt" data-value="small">SMALL</button>
+            <button class="opt" data-value="tiny">TINY</button>
+          </div>
+        </div>
+        <div class="option-group compact-choice">
+          <span class="option-label">BALL SPEED</span>
+          <div class="options" id="c-speed-options">
+            <button class="opt" data-value="slow">SLOW</button>
+            <button class="opt selected" data-value="normal">NORMAL</button>
+            <button class="opt" data-value="fast">FAST</button>
+            <button class="opt" data-value="ludicrous">LUDICROUS</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <span class="option-label">CURSES</span>
+          <div class="options" id="c-curse-options">
+            <button class="opt toggle" data-value="wear" style="--c:#ff9950">PADDLE WEAR</button>
+            <button class="opt toggle" data-value="fog" style="--c:#8899bb">FOG</button>
+            <button class="opt toggle" data-value="flicker" style="--c:#9aecff">PADDLE PHASE</button>
+            <button class="opt toggle" data-value="inverted" style="--c:#ff5a5a">INVERSION</button>
+            <button class="opt toggle" data-value="barrier" style="--c:#ff8f6a">BARRIER</button>
+            <button class="opt toggle" data-value="aiPerfect" style="--c:#ff3355">PERFECT AI</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <span class="option-label">SPECIAL BALLS</span>
+          <div class="options" id="c-ball-options">
+            <button class="opt toggle selected" data-value="gold" style="--c:#ffd950">GOLD</button>
+            <button class="opt toggle selected" data-value="phantom" style="--c:#be9fff">PHANTOM</button>
+            <button class="opt toggle selected" data-value="heavy" style="--c:#aebdd4">HEAVY</button>
+            <button class="opt toggle selected" data-value="splitter" style="--c:#66ff8c">SPLITTER</button>
+            <button class="opt toggle selected" data-value="comet" style="--c:#78dcff">COMET</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <span class="option-label">POWER-UPS</span>
+          <div class="options" id="c-powerup-options">
+            <button class="opt toggle selected" data-value="grow" style="--c:#4dff88">BIG PADDLE</button>
+            <button class="opt toggle selected" data-value="shrink" style="--c:#ff5a5a">SHRINK FOE</button>
+            <button class="opt toggle selected" data-value="multi" style="--c:#ffd950">MULTIBALL</button>
+            <button class="opt toggle selected" data-value="mega" style="--c:#ff8c1a">BALL STORM</button>
+            <button class="opt toggle selected" data-value="slow" style="--c:#b06bff">SLOW-MO</button>
+            <button class="opt toggle selected" data-value="ghost" style="--c:#9aecff">GHOST PADDLE</button>
+            <button class="opt toggle selected" data-value="charge" style="--c:#ffe14d">CATCH ZONE</button>
+            <button class="opt toggle selected" data-value="flip" style="--c:#ff9ee8">FLIP</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <span class="option-label">FIELD EVENTS</span>
+          <div class="options" id="c-field-options">
+            <button class="opt toggle selected" data-value="portals" style="--c:#35ffc8">PORTALS</button>
+            <button class="opt toggle selected" data-value="well" style="--c:#c46bff">GRAVITY WELL</button>
+            <button class="opt toggle selected" data-value="wind" style="--c:#9fd8ff">WIND</button>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <div class="launch-zone">
+        <button id="start-btn" class="big-btn">START MATCH</button>
+      </div>
+      </div>
+
+      <!-- INFO TAB -->
+      <div class="tab-page" id="tab-info" style="display:none">
+        <p class="controls-hint">Open a section for details.</p>
+        <details class="info-section" open>
+          <summary>CONTROLS</summary>
+          <ul class="controls-hint">
+            <li><strong>Move:</strong> mouse, W/S, or Up/Down arrows.</li>
+            <li><strong>Smash:</strong> left-click just before contact.</li>
+            <li><strong>Pause:</strong> P / Esc. <strong>Mute:</strong> M.</li>
+          </ul>
+        </details>
+        <details class="info-section" open>
+          <summary>CATCH ZONE</summary>
+          <ol class="controls-hint">
+            <li>Collect the ◎ power-up. Catch replaces smash for both sides for 30 seconds.</li>
+            <li>Left-click just before contact to arm a 0.45-second catch.</li>
+            <li>Once caught, aim with mouse or movement keys. Your paddle stays still.</li>
+            <li>Left-click again to fire. The side bar shows charge; the arrow shows direction.</li>
+          </ol>
+          <p class="controls-hint">Full charge takes 1.2 seconds. Auto-release after 3 seconds. AI uses timed catches and aims too.</p>
+        </details>
+        <details class="info-section">
+          <summary>POWER-UPS</summary>
+          <p class="controls-hint">Hit a pickup with the ball. The last side to touch the ball claims it.</p>
+          <ul class="controls-hint">
+            <li><strong>Big paddle:</strong> enlarges your paddle.</li>
+            <li><strong>Shrink foe:</strong> reduces the opponent's paddle.</li>
+            <li><strong>Multiball / Ball storm:</strong> adds one / up to seven balls.</li>
+            <li><strong>Slow-mo:</strong> slows all balls.</li>
+            <li><strong>Ghost paddle:</strong> adds an AI helper on your side.</li>
+            <li><strong>Catch Zone:</strong> enables catching, aiming, and charged shots.</li>
+            <li><strong>Flip:</strong> a 3-second warning, then the arena swaps sides for 10 seconds. The final 3 seconds count down before switching back. Scores and controls stay yours; pauses freeze the timer. Extra Flip pickups do not restart it.</li>
+          </ul>
+        </details>
+        <details class="info-section">
+          <summary>BALL TYPES</summary>
+          <ul class="controls-hint">
+            <li><strong>Gold:</strong> 3 points.</li>
+            <li><strong>Phantom:</strong> 2 points; fades in and out.</li>
+            <li><strong>Comet:</strong> 2 points; smaller and faster.</li>
+            <li><strong>Heavy:</strong> slower, heavier impacts.</li>
+            <li><strong>Splitter:</strong> splits on its first paddle hit.</li>
+            <li><strong>Fireball:</strong> high-speed balls ignite for at least 2 points.</li>
+          </ul>
+        </details>
+        <details class="info-section">
+          <summary>FIELD EVENTS</summary>
+          <ul class="controls-hint">
+            <li><strong>Portals:</strong> teleport balls.</li>
+            <li><strong>Gravity wells:</strong> bend ball paths.</li>
+            <li><strong>Wind:</strong> pushes balls vertically.</li>
+            <li><strong>Combo:</strong> long rallies raise the speed cap.</li>
+          </ul>
+        </details>
+        <details class="info-section">
+          <summary>DIFFICULTY</summary>
+          <ul class="controls-hint">
+            <li><strong>Relaxed:</strong> bigger paddle, slower ball, gentler solo AI.</li>
+            <li><strong>Easy / Normal:</strong> standard play; Easy gives more room to react.</li>
+            <li><strong>Hard:</strong> smaller paddle, faster ball, paddle wear and fog.</li>
+            <li><strong>Insane:</strong> stronger handicaps, wilder ball swerves, and a razor-sharp AI that smashes often.</li>
+            <li><strong>Impossible:</strong> adds perfect AI, paddle flicker and inverted controls.</li>
+            <li><strong>Custom:</strong> choose physics, curses, balls, power-ups and events. Barrier adds closing arena walls.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+
+    <!-- Pause overlay -->
+    <div id="pause" class="overlay">
+      <h1 class="title small" id="pause-title">PAUSED</h1>
+      <button id="resume-btn" class="big-btn">RESUME</button>
+      <button id="quit-btn" class="big-btn secondary">QUIT TO MENU</button>
+    </div>
+
+    <!-- Game over overlay -->
+    <div id="gameover" class="overlay">
+      <h1 class="title small" id="result-title">YOU WIN!</h1>
+      <p id="result-score" class="subtitle">7 — 3</p>
+      <button id="rematch-btn" class="big-btn">REMATCH</button>
+      <button id="menu-btn" class="big-btn secondary">MAIN MENU</button>
+    </div>
+  </div>
+
+  <!-- Classic scripts deliberately share one game runtime; load in dependency order. -->
+  <script src="js/core.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/gameplay.js"></script>
+  <script src="js/powerups.js"></script>
+  <script src="js/update.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/rooms.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor & OS noise
+.vscode/
+.idea/
+.pi/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tooling caches
+.pi/
+coverage/
+*.tsbuildinfo
+
+# Build output
+dist/
+build/
