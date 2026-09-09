@@ -151,6 +151,17 @@ function setControlSelection(groupId, selectedValues) {
 function syncCustomControls() {
   const editable = state.difficulty === 'custom';
   byId('difficulty-panel').classList.toggle('preset-locked', !editable);
+
+  /* AI SKILL tunes the bot brain, and in Player vs Player there is no bot on
+     either side - both paddles are human. Leaving the control visible offered a
+     setting that provably does nothing, and the read-only preset summary below
+     would still light up a tier as though one were in play. */
+  const hideAi = state.opponent === 'pvp';
+  byId('c-ai-group').style.display = hideAi ? 'none' : '';
+  /* The card matrix centers its final card, because seven cards leave an orphan
+     in a three-column grid. Hiding one makes six, which divide evenly, so that
+     centering has to be switched off or the last card drops to its own row. */
+  byId('difficulty-settings').classList.toggle('no-ai', hideAi);
   CUSTOM_CONTROL_GROUPS.forEach(groupId =>
     byId(groupId).querySelectorAll('.opt').forEach(btn => { btn.disabled = !editable; }));
 
@@ -285,10 +296,20 @@ leaveRoomBtn.addEventListener('click', () => {
   showRoomActions();
   roomStatusEl.textContent = 'CREATE OR JOIN A ROOM';
 });
-byId('join-room-btn').addEventListener('click', () => {
+function submitJoinCode() {
   const code = roomCodeInput.value.trim().toUpperCase();
   if (!code) { roomStatusEl.textContent = 'ENTER A ROOM CODE'; return; }
   roomConnect('join', code);
+}
+byId('join-room-btn').addEventListener('click', submitJoinCode);
+/* Enter submits the code. The join form is a plain div rather than a <form>,
+   so there is no implicit submit to inherit - without this the key does
+   nothing and the only way in is to click JOIN, which is not what anyone
+   expects after typing a code. */
+roomCodeInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  submitJoinCode();
 });
 function refreshMenu() {
   const v = state.gameMode;
@@ -296,14 +317,14 @@ function refreshMenu() {
   byId('time-group').style.display = MODES[v].timed ? '' : 'none';
   // Survival alone is restricted in AI-vs-AI: it needs a human on the right to own lives.
   const desc = {
-    classic:  'Timed match — most points when time runs out wins',
-    chaos:    'Timed match — 3+ balls, bumpers, ball rain, power-ups everywhere',
-    survival: '3 lives, 2 balls from the start, and a new wave every 20s — more balls, bumpers, ever faster. Hearts heal… if the AI doesn\'t claim them first',
-    endless:  'No clock, no winner — play a standard match for as long as you want. Quit when you are done.',
-    ffa:      'Non-stop war — ball storms, moving bumpers, breathing walls, and the balls never stop coming',
+    classic:  'Timed match - most points when time runs out wins',
+    chaos:    'Timed match - 3+ balls, bumpers, ball rain, power-ups everywhere',
+    survival: '3 lives, 2 balls from the start, and a new wave every 20s - more balls, bumpers, ever faster. Hearts heal… if the AI doesn\'t claim them first',
+    endless:  'No clock, no winner - play a standard match for as long as you want. Quit when you are done.',
+    ffa:      'Non-stop war - ball storms, moving bumpers, breathing walls, and the balls never stop coming',
   };
   let suffix = '';
-  if (isAivai()) suffix = '  •  Two bots, fresh personalities each match — sit back and watch the fight';
+  if (isAivai()) suffix = '  •  Two bots, fresh personalities each match - sit back and watch the fight';
   byId('mode-desc').textContent = desc[v] + suffix;
 
   // survival is the only opponent-restricted mode: it needs a human with
@@ -504,11 +525,17 @@ byId('quit-btn').addEventListener('click', () => {
 
 function pause() {
   // In PvP the match must keep running for the other player, so the menu is
-  // shown as an overlay only — the simulation is never actually paused.
+  // shown as an overlay only - the simulation is never actually paused.
   if (isPvp()) {
     if (state.mode === 'play' || state.mode === 'countdown') {
       byId('pause-title').textContent = 'MATCH IN PROGRESS';
       show('pause');
+      /* A key held down as the menu opens must not carry its momentum into the
+         overlay. keyup still clears keys, so this only covers the instant
+         before the player lets go - but that is exactly the case where the
+         paddle would visibly drift under the menu. */
+      for (const k of ['w', 's', 'arrowup', 'arrowdown']) keys[k] = false;
+      player.vy = player.smoothVy = 0;
     }
     return;
   }
@@ -534,9 +561,25 @@ for (const evt of ['pointerdown', 'keydown']) {
   window.addEventListener(evt, () => ensureAudioCtx(), { once: true });
 }
 
+/* True while the user is typing into a field, so game shortcuts stay out of
+   the way. Without this, entering a room code containing "M" silently toggles
+   mute and a "P" opens the pause overlay mid-word - and every keystroke is
+   additionally latched into `keys`, which is what the paddle reads. */
+function typingInField(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+         target.isContentEditable === true;
+}
+
 window.addEventListener('keydown', (e) => {
+  if (typingInField(e.target)) return;
   const k = e.key.toLowerCase();
-  keys[k] = true;
+  /* Movement keys are latched into `keys`, which the paddle and the held-ball
+     aim both read. The PvP pause menu keeps state.mode at 'play', so without
+     this W/S would still steer from behind the overlay. P/ESCAPE stay live -
+     they are what closes the menu. */
+  if (!netMenuOpen() || k === 'p' || k === 'escape') keys[k] = true;
   if (k === 'arrowup' || k === 'arrowdown') e.preventDefault();
   if (k === 'p' || k === 'escape') {
     // PvP never sets 'pause' mode, so toggle on the overlay's visibility.
@@ -567,6 +610,9 @@ function playerAction() {
 // Left click smashes/releases a held charged ball.
 canvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0 || state.mode !== 'play' || isAivai()) return;
+  // The PvP pause overlay leaves state.mode as 'play', so it has to be checked
+  // explicitly or a click landing on the arena still fires a smash.
+  if (netMenuOpen()) return;
   // Neither client simulates, so the click is sent as a discrete action. The
   // server queues it and applies it exactly once, which is what makes smash
   // reliable for both players.
@@ -628,7 +674,7 @@ window.addEventListener('blur', () => {
 });
 
 /* ============================================================
-   Loading screen — waits for the pixel font (the slow asset),
+   Loading screen - waits for the pixel font (the slow asset),
    with a progress feel and a hard timeout so it can never hang
    ============================================================ */
 {
@@ -638,7 +684,7 @@ window.addEventListener('blur', () => {
   let done = false;
 
 
-  // —— tiny self-playing pong rally as the loading animation ——
+  // -- tiny self-playing pong rally as the loading animation --
   const lc = byId('loading-anim');
   const lctx = lc.getContext('2d');
   const LW = lc.width, LH = lc.height;
@@ -660,7 +706,7 @@ window.addEventListener('blur', () => {
     lball.y += lball.vy * dt;
     if (lball.y < PR) { lball.y = PR; lball.vy = Math.abs(lball.vy); }
     if (lball.y > LH - PR) { lball.y = LH - PR; lball.vy = -Math.abs(lball.vy); }
-    // perfect little paddles — they always make it (it's a loading screen,
+    // perfect little paddles - they always make it (it's a loading screen,
     // nobody loses here)
     if (lball.x < PADW + PR && lball.vx < 0) {
       lball.x = PADW + PR;
@@ -675,7 +721,7 @@ window.addEventListener('blur', () => {
     lball.vx = Math.max(-420, Math.min(420, lball.vx));
     lball.vy = Math.max(-200, Math.min(200, lball.vy));
     // only the paddle the ball is heading toward chases it;
-    // the other relaxes back to center — no synchronized mirroring
+    // the other relaxes back to center - no synchronized mirroring
     if (lball.vx < 0) {
       lpad.l += (lball.y - lpad.l) * Math.min(1, 10 * dt);
       lpad.r += (LH / 2 - lpad.r) * Math.min(1, 3 * dt);
@@ -685,7 +731,7 @@ window.addEventListener('blur', () => {
     }
 
     lctx.clearRect(0, 0, LW, LH);
-    // single flat color, hard pixel edges — no glow, no curves
+    // single flat color, hard pixel edges - no glow, no curves
     lctx.fillStyle = theme.right.base;
     lctx.fillRect(0, lpad.l - PADH / 2, PADW, PADH);
     lctx.fillRect(LW - PADW, lpad.r - PADH / 2, PADW, PADH);
@@ -709,7 +755,7 @@ window.addEventListener('blur', () => {
     }, wait);
   }
 
-  // the pixel font is the only real remote asset — wait for it (max 4s)
+  // the pixel font is the only real remote asset - wait for it (max 4s)
   if (document.fonts && document.fonts.load) {
     Promise.all([
       document.fonts.load('12px "Press Start 2P"'),

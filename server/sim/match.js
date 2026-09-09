@@ -110,8 +110,26 @@ export class AuthoritativeMatch {
     pad.y = sim.clamp(pad.y, sim.topWall(), sim.botWall() - pad.h);
   }
 
+  /**
+   * Point a held ball where its owner is aiming.
+   *
+   * The simulation's own human-aim branch in updateBalls reads mouseY/mouseCX/
+   * keys, none of which exist server-side (the sandbox stubs them), so left to
+   * itself a caught ball in PvP never changes angle. The client sends the angle
+   * explicitly and it is written straight onto the ball.
+   *
+   * No mirroring: the angle is a side-relative bounce angle, and releaseBall
+   * applies the left/right direction itself.
+   */
+  aimHeldBall(side, aimAngle) {
+    if (aimAngle === null || !Number.isFinite(aimAngle)) return;
+    const sim = this.sim.sim;
+    const held = sim.balls.find(b => b.heldBy === side);
+    if (held) held.aimAngle = aimAngle;
+  }
+
   /* Screen shake and the goal flash are the only two effects whose decay lives
-     in render.js rather than in update(). On a client that is fine — every
+     in render.js rather than in update(). On a client that is fine - every
      frame draws and therefore decays them. The server has no renderer, so left
      alone they stay pinned at their peak value for the rest of the match.
 
@@ -150,8 +168,15 @@ export class AuthoritativeMatch {
       const prevPlayerY = sim.player.y;
       const prevAiY = sim.ai.y;
 
-      if (!sim.paddleHolds('player')) this.movePaddle(sim.player, hostIn.aimY, dt);
-      if (!sim.paddleHolds('ai')) this.movePaddle(sim.ai, guestIn.aimY, dt);
+      /* A paddle holding a ball does not move: its controls are aiming the
+         shot instead (updatePlayer returns early for exactly this reason).
+         The aim angle therefore has to be applied in its place, or the held
+         ball keeps whatever angle it was caught with and fires flat. */
+      if (sim.paddleHolds('player')) this.aimHeldBall('player', hostIn.aimAngle);
+      else this.movePaddle(sim.player, hostIn.aimY, dt);
+
+      if (sim.paddleHolds('ai')) this.aimHeldBall('ai', guestIn.aimAngle);
+      else this.movePaddle(sim.ai, guestIn.aimY, dt);
 
       // smoothVy feeds the paddle-english in paddleBounce, so it must be
       // derived from the movement the server actually performed.

@@ -43,7 +43,7 @@ function applyPowerup(pu, b) {
       }
       break;
     case 'heart':
-      // any ball touching a heart heals YOU — no stealing, no denial
+      // any ball touching a heart heals YOU - no stealing, no denial
       if (state.lives < SURVIVAL_LIVES) {
         state.lives++;
         popup(pu.x, pu.y - 24, '+1 LIFE!', '#d2647f', 16);
@@ -114,7 +114,7 @@ function updatePowerups(dt) {
     if (powerups[i].life <= 0) powerups.splice(i, 1);
   }
   // survival mercy: while hurt, a heart is guaranteed every ~6-9s.
-  // Hearts bypass the regular spawn cap — they're a lifeline, not a treat.
+  // Hearts bypass the regular spawn cap - they're a lifeline, not a treat.
   if (state.gameMode === 'survival' && state.lives < SURVIVAL_LIVES &&
       !powerups.some(p => p.type === 'heart')) {
     state.heartTimer -= dt;

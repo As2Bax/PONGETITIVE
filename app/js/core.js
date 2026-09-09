@@ -1,7 +1,7 @@
 'use strict';
 
 /* ============================================================
-   PONGETITIVE — You vs AI, AI vs AI, or head-to-head online.
+   PONGETITIVE - You vs AI, AI vs AI, or head-to-head online.
    You are always on the RIGHT. The LEFT paddle is the AI, or in Player-vs-
    Player the remote opponent (each client sees itself on the right).
    Modes: CLASSIC (timed) | CHAOS | SURVIVAL | ENDLESS | ROYALE
@@ -42,7 +42,7 @@ const GHOST_SCALE = 0.55;       // ghost paddles are smaller
 const GHOST_OFFSET = 74;        // how far in-field from the main paddles
 const GHOST_DURATION = 10;      // seconds the ghost helper sticks around
 
-/* rally combo: every hit past the threshold raises the effective speed cap —
+/* rally combo: every hit past the threshold raises the effective speed cap -
    a long enough rally has effectively no limit */
 const COMBO_START = 4;          // combo kicks in at this many consecutive hits
 const COMBO_CAP_STEP = 22;      // extra px/s of speed cap per combo level
@@ -61,7 +61,7 @@ const BALL_TYPES = {
   normal:  { weight: 62 },
   gold:    { weight: 8 },   // 3 pts, big & shiny
   phantom: { weight: 8 },   // 2 pts, blinks in and out of visibility
-  heavy:   { weight: 8 },   // slow tank — hits harder (shake), hard to speed up
+  heavy:   { weight: 8 },   // slow tank - hits harder (shake), hard to speed up
   splitter:{ weight: 7 },   // splits in two on its first paddle hit
   comet:   { weight: 7 },   // 2 pts, small and 25% faster
 };
@@ -82,7 +82,7 @@ const PHANTOM_CYCLE = 1.6;   // s per visible/invisible cycle
 const FIRE_FRAC = 0.85;      // ball at >85% of max speed ignites (2 pts)
 const PORTAL_EVERY = 22;     // portals appear roughly this often (s)
 
-/* more field events — periodic, telegraphed, all optional in CUSTOM */
+/* more field events - periodic, telegraphed, all optional in CUSTOM */
 const WELL_EVERY = 30;       // gravity well cadence (s)
 const WELL_LIFE = 8;
 const WELL_R = 210;          // influence radius
@@ -99,13 +99,13 @@ const PORTAL_R = 22;
    uses a perfect brain.
    Difficulty changes YOUR handicaps, the game's physics, and how much of the
    arena's chaos is switched on:
-     paddleScale — your paddle size
-     ballSpeed / speedup / maxSpeed — how fast things get
-     rallyShrink — your paddle shrinks a bit every time YOU hit
-     fog — the ball fades out as it approaches your side
-     flicker / inverted — IMPOSSIBLE-only curses on your paddle and controls
-     events — which field events can spawn (portals / well / wind)
-     powerups — which pickups are in the spawn pool for this tier
+     paddleScale - your paddle size
+     ballSpeed / speedup / maxSpeed - how fast things get
+     rallyShrink - your paddle shrinks a bit every time YOU hit
+     fog - the ball fades out as it approaches your side
+     flicker / inverted - IMPOSSIBLE-only curses on your paddle and controls
+     events - which field events can spawn (portals / well / wind)
+     powerups - which pickups are in the spawn pool for this tier
 ---------------------------------------------------------------- */
 const AI_CFG = {
   speed: 390,          // max paddle px/s
@@ -116,7 +116,7 @@ const AI_CFG = {
 };
 
 const DIFFICULTY = {
-  // RELAXED: the anti-competitive tier — big paddle, lazy ball, and the AI
+  // RELAXED: the anti-competitive tier - big paddle, lazy ball, and the AI
   // loosens up too (chill brain). For unwinding, not for winning arguments.
   relaxed: { paddleScale: 1.5, ballSpeed: 320, speedup: 1.02, maxSpeed: 700, rallyShrink: false, fog: null, aiChill: true, events: {},             powerups: { grow: true, shrink: true, slow: true } },
   easy:   { paddleScale: 1.25, ballSpeed: 380, speedup: 1.035, maxSpeed: 880,  rallyShrink: false, fog: null,              events: {},             powerups: { grow: true, shrink: true, slow: true } },
@@ -125,8 +125,8 @@ const DIFFICULTY = {
   insane: {
     paddleScale: 0.5, ballSpeed: 620, speedup: 1.10, maxSpeed: 1500,
     rallyShrink: true, fog: { start: 0.42, end: 0.68 },
-    aiSharp: true,     // a hungry, in-form opponent — not a machine, but close
-    aiFieldPlay: true, // it toys with wells/portals — but only now and then, and never with impossible's surgical precision
+    aiSharp: true,     // a hungry, in-form opponent - not a machine, but close
+    aiFieldPlay: true, // it toys with wells/portals - but only now and then, and never with impossible's surgical precision
     events: { portals: true, well: true, wind: true },
     powerups: { grow: true, shrink: true, multi: true, slow: true, ghost: true, charge: true, flip: true },
   },
@@ -200,18 +200,18 @@ buildCustomCfg();
 const RALLY_SHRINK_STEP = 0.07;   // per own hit
 const RALLY_SHRINK_MIN = 0.4;
 const INVERT_DURATION = 2;        // s the inverted-controls curse lasts
-// IMPOSSIBLE: the AI stops pretending to be human — and plays ruthlessly:
+// IMPOSSIBLE: the AI stops pretending to be human - and plays ruthlessly:
 // exact multi-bounce prediction, edge-of-paddle contact to fire returns into
 // the corner you can't reach, guaranteed smashes, full-charge catches.
 const PERFECT_BRAIN = {
   speed: 2000, lookAhead: 3, wobble: 0, lapseChance: 0, lapseError: 0,
   ruthless: true,
 };
-// RELAXED: the AI kicks back — slower hands, wobblier aim, more whiffs
+// RELAXED: the AI kicks back - slower hands, wobblier aim, more whiffs
 const CHILL_BRAIN = {
   speed: 290, lookAhead: 0.2, wobble: 62, lapseChance: 0.45, lapseError: 160,
 };
-// INSANE: a hungry opponent at the top of its game — fast hands, long reads,
+// INSANE: a hungry opponent at the top of its game - fast hands, long reads,
 // steady aim, and it almost never misjudges. Human-shaped, machine-adjacent.
 const SHARP_BRAIN = {
   speed: 640, lookAhead: 0.75, wobble: 10, lapseChance: 0.06, lapseError: 50,
@@ -245,7 +245,7 @@ const MODES = {
 };
 /* Barriers should apply real pressure. The corridor closes quickly enough to
    change how a rally is played, settles narrow enough that position actually
-   matters, and keeps moving once it is there — a static tunnel stops being a
+   matters, and keeps moving once it is there - a static tunnel stops being a
    hazard and just becomes the new arena.
 
    The floor is deliberately a little under two paddle-heights: tight enough to
@@ -275,7 +275,7 @@ const POWERUP_TYPES = {
   flip:   { color: '#c98bbf', label: '↔',  name: 'FLIP' }, 
 };
 /* catch zone: for a window, paddles CATCH the ball, charge it up, and
-   release it at boosted speed. Everyone — humans, AI, bots — can use it. */
+   release it at boosted speed. Everyone - humans, AI, bots - can use it. */
 const CHARGE_WINDOW = 30;    // s the catch window stays open
 const CATCH_WINDOW = 0.45;   // click shortly before contact to catch
 const CHARGE_HOLD_LIMIT = 3; // full charge can be aimed briefly before auto-release
@@ -371,7 +371,7 @@ const ai = {
 };
 
 // ghost paddles (power-up): AI-driven helpers, one per side, free to overlap the mains.
-// Each has a timer — 0 means inactive.
+// Each has a timer - 0 means inactive.
 function makeGhost(x) {
   return {
     x, y: H / 2 - BASE_PADDLE_H * GHOST_SCALE / 2,
@@ -388,7 +388,7 @@ function makeGhost(x) {
 }
 const ghostL = makeGhost(PADDLE_MARGIN + GHOST_OFFSET);
 const ghostR = makeGhost(W - PADDLE_MARGIN - PADDLE_W - GHOST_OFFSET);
-// ghosts are sloppier than the main AI — helpers, not walls
+// ghosts are sloppier than the main AI - helpers, not walls
 const ghostBrain = {
   speed: AI_CFG.speed * 0.8,
   lookAhead: AI_CFG.lookAhead * 0.7,
@@ -411,7 +411,7 @@ const ripples = []; // expanding rings (wall taps, goals, portal use)
 
    In PvP the SERVER runs these same functions while simulating and records what
    they produced, shipping the result in its snapshots; clients replay that
-   list. So there is nothing to forward from here — a client only ever draws its
+   list. So there is nothing to forward from here - a client only ever draws its
    own local effects. */
 function ripple(x, y, color, maxR = 60, width = 3) {
   ripples.push({ x, y, color, r: 6, maxR, width, life: 1 });
@@ -473,7 +473,7 @@ const activeLongSounds = new Map();
 /* Reverb bus. Every sound plays dry into the destination and also feeds a
    shared convolver, so the arena has a consistent sense of space. The impulse
    response is generated (decaying filtered noise) rather than shipped as an
-   asset — cheap, and it keeps the game dependency-free. */
+   asset - cheap, and it keeps the game dependency-free. */
 const REVERB_SECONDS = 1.5;
 const REVERB_DECAY = 3.2;      // higher = tighter tail
 let reverbBus = null;
@@ -632,7 +632,7 @@ function startSample(ctx, name, { rate = 1, gain = 1 } = {}) {
 
   // Optionally shorten an over-long sample. Loudness is perceived roughly
   // logarithmically, so a linear ramp sounds like it drops out abruptly near
-  // the end — an exponential decay reads as a natural tail instead.
+  // the end - an exponential decay reads as a natural tail instead.
   if (cfgSample.maxDur) {
     const fade = cfgSample.fade ?? 0.2;
     const stopAt = now + cfgSample.maxDur;
@@ -704,7 +704,7 @@ const sfx = {
     beep(660, 0.06); setTimeout(() => beep(990, 0.09), 60);
   },
   life:   () => { beep(311, 0.1, 'sawtooth', 0.1); setTimeout(() => beep(233, 0.18, 'sawtooth', 0.1), 100); },
-  // proper goal horns — loud enough to land over the shake and particles.
+  // proper goal horns - loud enough to land over the shake and particles.
   // In high-scoring chaos (royale etc.) rapid goals fall back to a short
   // single blip so the fanfare doesn't loop into an air-raid siren.
   _lastGoalAt: 0,
@@ -722,7 +722,7 @@ const sfx = {
       beep(isFor ? 784 : 220, 0.07, isFor ? 'triangle' : 'sine', 0.07);
       return;
     }
-    // gentle two-note motifs — softer waveforms, modest volume
+    // gentle two-note motifs - softer waveforms, modest volume
     if (isFor) {
       beep(523, 0.08, 'triangle', 0.09);
       setTimeout(() => beep(784, 0.14, 'triangle', 0.09), 90);
@@ -773,7 +773,7 @@ function spawnParticles(x, y, color, n = 14, power = 260) {
    It exists as a named helper, rather than pushing into `particles` inline,
    because that array is client-only presentation. In PvP the server runs this
    same code and records the effects it produces, so anything written straight
-   into `particles` is invisible to the other player — which is exactly why the
+   into `particles` is invisible to the other player - which is exactly why the
    smash trail never appeared online. */
 function spawnBurst(x, y, color, {
   n = 12, angle = 0, spread = 0.65, power = 260, powerVar = 180,
@@ -811,7 +811,7 @@ const debugParticipant = (who) => isAivai()
 // that name follows the palette rather than a baked-in 'PINK'.
 const foeName = () => isAivai() ? theme.left.name : (state.opponent === 'pvp' ? 'PLAYER' : 'AI');
 
-// per-match bot personalities (AI vs AI) — jittered so the fight isn't a mirror
+// per-match bot personalities (AI vs AI) - jittered so the fight isn't a mirror
 const aiBrains = { left: { ...AI_CFG }, right: { ...AI_CFG } };
 function rollPersonalities() {
   for (const side of ['left', 'right']) {
@@ -850,7 +850,7 @@ const ballValue = (b) =>
   b.type === 'gold' ? 3 :
   b.type === 'phantom' || b.type === 'comet' ? 2 :
   isFireball(b) ? 2 : 1;
-// phantom balls fade in/out on a cycle (never fully at the paddle plane — min 6%)
+// phantom balls fade in/out on a cycle (never fully at the paddle plane - min 6%)
 function phantomAlpha(b) {
   if (b.type !== 'phantom') return 1;
   const t = ((performance.now() / 1000 + b.phase) % PHANTOM_CYCLE) / PHANTOM_CYCLE;
@@ -861,8 +861,8 @@ function paddleHeight(p) {
   if (p.ghost) return BASE_PADDLE_H * GHOST_SCALE;
   let h = BASE_PADDLE_H;
   /* Difficulty handicaps shrink the HUMAN's paddle, so against the AI only the
-     right-hand paddle is scaled. When both paddles are driven by people — PvP,
-     or AI-vs-AI — the handicap has to apply to both or the match is not a fair
+     right-hand paddle is scaled. When both paddles are driven by people - PvP,
+     or AI-vs-AI - the handicap has to apply to both or the match is not a fair
      fight: on hard the host would play with a 63px paddle against the guest's
      90px, and on impossible 36px against 90px.
 
@@ -949,7 +949,7 @@ function serve(direction) {
 
      Rallies average a few seconds while the corridor takes considerably longer
      to close, so wiping its progress every point meant players effectively
-     never saw it shut — the modifier looked slow and toothless because its
+     never saw it shut - the modifier looked slow and toothless because its
      interesting state was unreachable. Winding the clock back partway gives the
      arena breathing room after a goal while letting pressure build over the
      course of a match.
@@ -986,7 +986,7 @@ function serve(direction) {
   sfx.count();
 }
 
-// ROYALE: balls depleted mid-fight — respawn at center and keep rolling.
+// ROYALE: balls depleted mid-fight - respawn at center and keep rolling.
 // Zone, bumpers, portals and arena state all stay exactly where they were.
 function replenishBalls(direction) {
   const midY = (topWall() + botWall()) / 2;
@@ -1068,7 +1068,7 @@ function endMatch({ fromNetwork = false } = {}) {
     const m = Math.floor(t / 60), s = String(t % 60).padStart(2, '0');
     title.textContent = 'GAME OVER';
     title.style.color = '#e0a33e';
-    scoreEl.textContent = `SURVIVED ${m}:${s}  —  ${p} POINT${p === 1 ? '' : 'S'}`;
+    scoreEl.textContent = `SURVIVED ${m}:${s}  -  ${p} POINT${p === 1 ? '' : 'S'}`;
     sfx.lose();
     show('gameover');
     return;
@@ -1080,7 +1080,7 @@ function endMatch({ fromNetwork = false } = {}) {
     title.textContent = `${winner.name} WINS!`;
     title.style.color = winner.base;
     sfx.win();
-    scoreEl.textContent = `${a} — ${p}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');
+    scoreEl.textContent = `${a} - ${p}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');
     show('gameover');
     return;
   }
@@ -1094,7 +1094,7 @@ function endMatch({ fromNetwork = false } = {}) {
     title.style.color = theme.left.base;
     sfx.lose();
   }
-  scoreEl.textContent = `${p} — ${a}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');
+  scoreEl.textContent = `${p} - ${a}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');
   show('gameover');
 }
 

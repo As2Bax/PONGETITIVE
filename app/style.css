@@ -425,6 +425,12 @@ body.spectating #game-wrapper {
 }
 /* Seven cards leaves one final card; put it on the grid's center line. */
 .difficulty-settings .option-group:last-child { grid-column: 2; }
+/* ...but in PvP the AI SKILL card is hidden, and the remaining six fill all
+   three columns exactly. `display: none` does not change which element is
+   :last-child, so without this the final card is still dragged onto the center
+   line - which pushes it into a row of its own and leaves a hole beside the
+   card before it. With no orphan to center, ordinary flow is already right. */
+.difficulty-settings.no-ai .option-group:last-child { grid-column: auto; }
 .difficulty-settings .option-group {
   display: flex;
   flex-direction: column;
@@ -477,6 +483,13 @@ body.spectating #game-wrapper {
     width: calc((100% - 12px) / 2);
     box-sizing: border-box;
   }
+  /* Six cards divide evenly across two columns as well, so the final card is
+     again a normal cell rather than a centered orphan. */
+  .difficulty-settings.no-ai .option-group:last-child {
+    grid-column: auto;
+    justify-self: stretch;
+    width: auto;
+  }
 }
 @media (max-width: 500px) {
   .difficulty-settings { grid-template-columns: 1fr; }
@@ -527,6 +540,42 @@ body.spectating #game-wrapper {
 .info-section ul, .info-section ol { padding-left: 22px; }
 .info-section li + li { margin-top: 8px; }
 .info-section strong { color: var(--fg); font-weight: normal; }
+
+/* Two-column term/value lists. The label column sizes to its content so every
+   row in a section shares one gutter, which is what makes them scannable. */
+.keybinds, .statlist {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 16px;
+  align-items: baseline;
+  margin-top: 12px;
+  font-size: 8px;
+  line-height: 1.9;
+}
+.keybinds dt, .statlist dt { color: var(--fg); white-space: nowrap; }
+.keybinds dd, .statlist dd { color: var(--dim); }
+.statlist dd b { color: var(--accent); font-weight: normal; }
+/* Keys sit in a row that can wrap on narrow screens without breaking a chord. */
+.keybinds dd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.keybinds .note, .statlist .note { color: var(--dim); opacity: 0.75; }
+
+/* Icon chip echoing the pickup's arena color, so the list reads like the game. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  padding: 2px 4px;
+  margin-right: 5px;
+  border: 1px solid var(--c);
+  color: var(--c);
+  font-size: 7px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.info-section .steps { margin-top: 12px; }
+.info-section .steps + .statlist { margin-top: 14px; }
 
 /* ---------- controls ---------- */
 .option-group {
@@ -634,6 +683,12 @@ kbd {
   font-family: inherit;
   background: var(--panel-alt);
   border: 1px solid var(--line);
-  padding: 2px 5px;
+  border-bottom-width: 2px;
+  padding: 3px 6px;
   color: var(--fg);
+  font-size: 8px;
+  line-height: 1;
+  white-space: nowrap;
 }
+/* Adjacent keys are alternatives (W/S), so they read as one cluster. */
+kbd + kbd { margin-left: 2px; }

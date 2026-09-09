@@ -29,8 +29,8 @@ const SIM_FILES = ['core.js', 'ai.js', 'gameplay.js', 'powerups.js', 'update.js'
    missing names BEFORE the sim is evaluated.
 
    Every net helper reports false: server-side there is no host and no guest,
-   just one neutral simulation. That makes the sim take its plain local path —
-   which is exactly the authoritative behavior we want — and it means all the
+   just one neutral simulation. That makes the sim take its plain local path -
+   which is exactly the authoritative behavior we want - and it means all the
    host/guest branching in update.js is simply never entered. */
 /* theme.js is a browser-only presentation module (it touches localStorage and
    documentElement), so it is never loaded here. The simulation still reads
@@ -190,9 +190,42 @@ const EFFECT_CAPTURE = `
   // Audio: replaced with recorders. Clients own their own playback.
   for (const key of Object.keys(sfx)) {
     const name = key;
+    if (typeof sfx[name] !== 'function') continue;
     sfx[name] = (...args) => q.push({ k: 'sfx', n: name, a: args.filter(v => typeof v === 'number') });
   }
-  beep = () => {};
+
+  /* beep() is a synthesized tone, not a sample, and a great deal of the game's
+     audio is ONLY beeps: the whole catch-zone vocabulary (charge whine, full-
+     charge chime, release thump), the combo ladder, bumpers, portals, power-up
+     stings and the wave horn all call it directly rather than going through
+     sfx.*. Stubbing it to nothing therefore left PvP silent for every one of
+     those cues, even though the sample-backed ones came through fine.
+
+     Recording it like any other effect puts them back. The arguments are the
+     complete description of the tone, so a client can reproduce it exactly. */
+  beep = function (freq, dur = 0.06, type = 'square', vol = 0.12) {
+    q.push({ k: 'beep', f: freq, d: dur, ty: type, v: vol });
+  };
+
+  /* Layered cues schedule their follow-up tones with setTimeout, which the shim
+     neutralises so a match never holds the event loop open. That silently threw
+     away the second half of every two-tone cue - the octave chime that marks a
+     full charge, the rising pair on a split, the power-up sting.
+
+     Running the callback immediately would collapse the layers into one instant
+     of noise, so the delay is recorded instead and the client re-schedules it
+     locally. The tone still lands late, on the client, exactly as designed. */
+  setTimeout = function (fn, delay = 0) {
+    if (typeof fn !== 'function') return 0;
+    const mark = q.length;
+    fn();
+    // Tag whatever the callback queued as delayed, so the client waits before
+    // playing it rather than firing it with the rest of this tick's audio.
+    for (let i = mark; i < q.length; i++) {
+      if (q[i].k === 'beep') q[i].dl = delay;
+    }
+    return 0;
+  };
 
   // endMatch touches the DOM for the result screen. Server-side we only need
   // the state transition; clients render their own result text.
@@ -211,7 +244,7 @@ export class HeadlessMatch {
    *   netcode tests do this), since it declares the same names.
    * @param {boolean} [opts.captureEffects=true] Replace the presentation
    *   helpers with recorders. Set false to build a context that behaves like a
-   *   browser client, actually spawning particles instead of queueing events —
+   *   browser client, actually spawning particles instead of queueing events -
    *   used by tests that check what a client renders on receiving a snapshot.
    */
   constructor({ netStubs = true, captureEffects = true } = {}) {
@@ -222,7 +255,7 @@ export class HeadlessMatch {
 
     // One script: lexical bindings must share a single top-level scope.
     // 'use strict' directives inside the individual files are stripped of their
-    // directive position by concatenation, which is fine — the code does not
+    // directive position by concatenation, which is fine - the code does not
     // rely on sloppy-mode semantics, and each file is already strict-safe.
     const combined = [
       netStubs ? NET_STUBS : MINIMAL_STUBS,

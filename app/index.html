@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PONGETITIVE</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -172,7 +173,7 @@
             <button class="opt toggle" data-value="barrier" style="--c:#cf8a6a"><span aria-hidden="true">▰</span> BARRIER</button>
           </div>
         </div>
-        <div class="option-group">
+        <div class="option-group" id="c-ai-group">
           <span class="option-label">AI SKILL</span>
           <div class="options" id="c-ai-options">
             <button class="opt" data-value="chill" style="--c:#7fc7a0">CHILL</button>
@@ -202,75 +203,93 @@
         <p class="controls-hint">Open a section for details.</p>
         <details class="info-section" open>
           <summary>CONTROLS</summary>
-          <ul class="controls-hint">
-            <li><strong>Move:</strong> mouse, W/S, or Up/Down arrows.</li>
-            <li><strong>Smash:</strong> left-click just before contact.</li>
-            <li><strong>Pause:</strong> P / Esc. <strong>Mute:</strong> M.</li>
-          </ul>
+          <dl class="keybinds">
+            <dt>Move</dt>
+            <dd><kbd>Mouse</kbd>, <kbd>W</kbd><kbd>S</kbd>, <kbd>↑</kbd><kbd>↓</kbd></dd>
+            <dt>Smash</dt>
+            <dd><kbd>Left Click</kbd> <span class="note">just before contact</span></dd>
+            <dt>Pause</dt>
+            <dd><kbd>P</kbd>, <kbd>Esc</kbd></dd>
+            <dt>Mute</dt>
+            <dd><kbd>M</kbd></dd>
+          </dl>
         </details>
         <details class="info-section" open>
           <summary>CATCH ZONE</summary>
-          <ol class="controls-hint">
-            <li>Collect the ◎ power-up. Catch replaces smash for both sides for 30 seconds.</li>
-            <li>Left-click just before contact to arm a 0.45-second catch.</li>
-            <li>Once caught, aim with mouse or movement keys. Your paddle stays still.</li>
-            <li>Left-click again to fire. The side bar shows charge; the arrow shows direction.</li>
-          </ol>
-          <p class="controls-hint">Full charge takes 1.2 seconds. Auto-release after 3 seconds. AI uses timed catches and aims too.</p>
+          <p class="controls-hint">Collect the <span class="pill" style="--c:#e3c15a">◎</span> power-up. Catch replaces smash for both sides for 30 seconds.</p>
+          <dl class="keybinds">
+            <dt>Arm</dt>
+            <dd><kbd>Left Click</kbd> <span class="note">0.45s window, just before contact</span></dd>
+            <dt>Aim</dt>
+            <dd><kbd>Mouse</kbd>, <kbd>W</kbd><kbd>S</kbd>, <span class="note">paddle stays still</span></dd>
+            <dt>Fire</dt>
+            <dd><kbd>Left Click</kbd> <span class="note">side bar charges, arrow aims</span></dd>
+          </dl>
+          <dl class="statlist">
+            <dt>Full charge</dt><dd>1.2s</dd>
+            <dt>Auto-release</dt><dd>3s</dd>
+          </dl>
         </details>
         <details class="info-section">
           <summary>POWER-UPS</summary>
-          <p class="controls-hint">Hit a pickup with the ball. The last side to touch the ball claims it.</p>
-          <ul class="controls-hint">
-            <li><strong>Big paddle:</strong> enlarges your paddle.</li>
-            <li><strong>Shrink foe:</strong> reduces the opponent's paddle.</li>
-            <li><strong>Multiball / Ball storm:</strong> adds one / up to seven balls.</li>
-            <li><strong>Slow-mo:</strong> slows all balls.</li>
-            <li><strong>Ghost paddle:</strong> adds an AI helper on your side.</li>
-            <li><strong>Catch Zone:</strong> enables catching, aiming, and charged shots.</li>
-            <li><strong>Flip:</strong> a 3-second warning, then the arena swaps sides for 10 seconds. The final 3 seconds count down before switching back. Scores and controls stay yours. Extra Flip pickups do not restart it.</li>
-          </ul>
+          <p class="controls-hint">Hit a pickup with the ball. The last side to touch it claims the effect.</p>
+          <dl class="statlist">
+            <dt><span class="pill" style="--c:#6fbf73">＋</span> Big paddle</dt><dd>Enlarges your paddle</dd>
+            <dt><span class="pill" style="--c:#cf5a4e">−</span> Shrink foe</dt><dd>Reduces their paddle</dd>
+            <dt><span class="pill" style="--c:#d9a441">×2</span> Multiball</dt><dd>Adds one ball</dd>
+            <dt><span class="pill" style="--c:#d2803a">×8</span> Ball storm</dt><dd>Adds up to seven</dd>
+            <dt><span class="pill" style="--c:#8f76c8">~</span> Slow-mo</dt><dd>Slows every ball</dd>
+            <dt><span class="pill" style="--c:#93b8cf">‖</span> Ghost paddle</dt><dd>Spawns an AI helper on your side</dd>
+            <dt><span class="pill" style="--c:#e3c15a">◎</span> Catch Zone</dt><dd>Catch, aim and charge shots</dd>
+            <dt><span class="pill" style="--c:#c98bbf">↔</span> Flip</dt><dd>Swaps the arena for 10s</dd>
+          </dl>
+          <p class="controls-hint">Flip warns for 3s, then counts down the last 3 before switching back. Scores and controls stay yours, and extra Flips do not restart it.</p>
         </details>
         <details class="info-section">
           <summary>BALL TYPES</summary>
-          <ul class="controls-hint">
-            <li><strong>Gold:</strong> 3 points.</li>
-            <li><strong>Phantom:</strong> 2 points; fades in and out.</li>
-            <li><strong>Comet:</strong> 2 points; smaller and faster.</li>
-            <li><strong>Heavy:</strong> slower, heavier impacts.</li>
-            <li><strong>Splitter:</strong> splits on its first paddle hit.</li>
-            <li><strong>Fireball:</strong> high-speed balls ignite for at least 2 points.</li>
-          </ul>
+          <dl class="statlist">
+            <dt><span class="pill" style="--c:#d9a441">●</span> Gold</dt><dd><b>3 pts</b></dd>
+            <dt><span class="pill" style="--c:#a99bd0">◌</span> Phantom</dt><dd><b>2 pts</b> · fades in and out</dd>
+            <dt><span class="pill" style="--c:#79b4cf">☄</span> Comet</dt><dd><b>2 pts</b> · smaller, faster</dd>
+            <dt><span class="pill" style="--c:#d1602f">◉</span> Fireball</dt><dd><b>2+ pts</b> · ignites at high speed</dd>
+            <dt><span class="pill" style="--c:#aebdd4">⬤</span> Heavy</dt><dd>Slower, heavier impacts</dd>
+            <dt><span class="pill" style="--c:#7cc98a">●●</span> Splitter</dt><dd>Splits on first paddle hit</dd>
+          </dl>
         </details>
         <details class="info-section">
           <summary>FIELD EVENTS</summary>
-          <ul class="controls-hint">
-            <li><strong>Portals:</strong> teleport balls.</li>
-            <li><strong>Gravity wells:</strong> bend ball paths.</li>
-            <li><strong>Wind:</strong> pushes balls vertically.</li>
-            <li><strong>Combo:</strong> long rallies raise the speed cap.</li>
-          </ul>
+          <dl class="statlist">
+            <dt><span class="pill" style="--c:#4fb59b">◉</span> Portals</dt><dd>Teleport balls across the arena</dd>
+            <dt><span class="pill" style="--c:#9a72c4">◎</span> Gravity well</dt><dd>Bends ball paths</dd>
+            <dt><span class="pill" style="--c:#9fbdd6">≈</span> Wind</dt><dd>Pushes balls vertically</dd>
+            <dt><span class="pill" style="--c:#d9a441">↑</span> Combo</dt><dd>Long rallies raise the speed cap</dd>
+          </dl>
         </details>
         <details class="info-section">
           <summary>DIFFICULTY</summary>
-          <ul class="controls-hint">
-            <li><strong>Relaxed:</strong> bigger paddle, slower ball, gentler solo AI.</li>
-            <li><strong>Easy / Normal:</strong> standard play; Easy gives more room to react.</li>
-            <li><strong>Hard:</strong> smaller paddle, faster ball, paddle wear and fog.</li>
-            <li><strong>Insane:</strong> stronger handicaps and a razor-sharp AI that smashes often and turns wells and portals against you.</li>
-            <li><strong>Impossible:</strong> adds perfect AI, paddle flicker and inverted controls.</li>
-            <li><strong>Custom:</strong> choose physics, AI skill, curses, balls, power-ups and events. Barrier adds closing arena walls.</li>
-            <li>Higher tiers also unlock more of the arena: field events and the trickier power-ups only appear as difficulty rises.</li>
-          </ul>
+          <dl class="statlist">
+            <dt>Relaxed</dt><dd>Bigger paddle, slower ball, gentler AI</dd>
+            <dt>Easy</dt><dd>Standard play with more room to react</dd>
+            <dt>Normal</dt><dd>Standard play</dd>
+            <dt>Hard</dt><dd>Smaller paddle, faster ball, wear and fog</dd>
+            <dt>Insane</dt><dd>Sharp AI that smashes often and turns the arena against you</dd>
+            <dt>Impossible</dt><dd>Perfect AI, paddle flicker, inverted controls</dd>
+            <dt>Custom</dt><dd>Pick your own physics, curses, balls, power-ups and events</dd>
+          </dl>
+          <p class="controls-hint">Higher tiers also unlock more of the arena — field events and the trickier power-ups only appear as difficulty rises.</p>
         </details>
         <details class="info-section">
           <summary>PLAYER VS PLAYER</summary>
-          <ul class="controls-hint">
-            <li>Pick <strong>Player vs Player</strong> under Opponent, then create a room or join one with a code.</li>
-            <li>The host owns the match settings and starts the game; the guest's options stay locked.</li>
-            <li>Both players always see themselves on the right.</li>
-            <li>Pausing only opens the menu. The match keeps running for the other player.</li>
-          </ul>
+          <ol class="controls-hint steps">
+            <li>Pick <strong>Player vs Player</strong> under Opponent.</li>
+            <li>Create a room, or join one with a code.</li>
+            <li>The host sets the rules and starts the match.</li>
+          </ol>
+          <dl class="statlist">
+            <dt>Sides</dt><dd>Both players always see themselves on the right</dd>
+            <dt>Settings</dt><dd>Host only — the guest's options stay locked</dd>
+            <dt>Pausing</dt><dd>Opens your menu only; the match keeps running</dd>
+          </dl>
         </details>
       </div>
     </div>
@@ -285,7 +304,7 @@
     <!-- Game over overlay -->
     <div id="gameover" class="overlay">
       <h1 class="title small" id="result-title">YOU WIN!</h1>
-      <p id="result-score" class="subtitle">7 — 3</p>
+      <p id="result-score" class="subtitle">7 - 3</p>
       <button id="rematch-btn" class="big-btn">REMATCH</button>
       <button id="menu-btn" class="big-btn secondary">MAIN MENU</button>
     </div>

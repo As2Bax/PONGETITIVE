@@ -5,7 +5,7 @@
 
    The game's simulation files (core/ai/gameplay/powerups/update) are classic
    global scripts written for a browser. They are loaded verbatim on the server
-   inside a `vm` context so there is exactly ONE source of truth for physics —
+   inside a `vm` context so there is exactly ONE source of truth for physics -
    no port, no drift, no build step.
 
    This module fabricates the small surface of browser globals those files

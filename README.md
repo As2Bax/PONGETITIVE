@@ -90,7 +90,7 @@ The stack is two containers:
 - **server**: Node/WebSocket service owning Player-vs-Player rooms.
 
 ```bash
-docker compose up --build     # http://localhost:8280
+docker compose up -d     # http://localhost:8280
 docker compose down
 ```
 

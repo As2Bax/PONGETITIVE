@@ -34,8 +34,8 @@ const RECONCILE_RATE = 6; // how firmly dead-reckoned balls are pulled to truth
 
 /* Own-paddle reconciliation.
 
-   The naive approach — easing the paddle toward the position in the newest
-   snapshot — is wrong, and it is what made paddles jitter. That position
+   The naive approach - easing the paddle toward the position in the newest
+   snapshot - is wrong, and it is what made paddles jitter. That position
    describes where the paddle was roughly one round trip ago, so while the
    player is moving it is permanently behind. Easing toward it drags the paddle
    backwards every frame while prediction pushes it forwards, and the two fight.
@@ -65,16 +65,18 @@ const NET_MAX_PADDLE_SPEED = 1800;
 
 const net = {
   active: false,
-  role: null,           // 'host' | 'guest' — lobby role only
+  role: null,           // 'host' | 'guest' - lobby role only
   mirror: false,        // guest mirrors its view so it sees itself on the right
   seq: 0,               // outgoing input sequence number
   pending: [],          // inputs sent but not yet acknowledged (for replay)
   inputT: 0,
   action: false,        // local click latch
+  aimAngle: null,       // predicted held-ball aim, sent as a level like aimY
   targets: null,        // opponent position/velocity used for extrapolation
   ownY: null,           // authoritative own position, brought up to date
   ended: false,         // game-over overlay already shown
   audio: {},            // previous snapshot values used to trigger sound
+  hud: {},              // previous snapshot values used to trigger HUD punches
   ping: null,           // smoothed round-trip time in ms, null until measured
   pingSamples: [],      // recent raw RTT samples, for a stable median
   settling: false,      // true while a screen transition is rebuilding state
@@ -93,7 +95,7 @@ const net = {
 
    Taking the MINIMUM over a short window sidesteps that. The fastest round trip
    in the window is the one that happened to queue least, which is the closest
-   estimate of true network latency available — the same reason ping utilities
+   estimate of true network latency available - the same reason ping utilities
    report a minimum alongside the average. */
 /* Samples considered when picking the minimum. A couple of seconds' worth: long
    enough to contain a low-overhead sample, short enough to follow real changes
@@ -107,7 +109,7 @@ function netRecordPing(sentAt) {
   if (net.pingSamples.length > PING_WINDOW) net.pingSamples.shift();
   /* No constant is subtracted here. An ack is sometimes held until the next
      snapshot and sometimes ships immediately, so the overhead is variable, not
-     fixed — measured against the real server the best sample on localhost is
+     fixed - measured against the real server the best sample on localhost is
      ~1ms, meaning the hold frequently does not apply at all. Taking the minimum
      already selects those samples; subtracting an interval on top would
      under-report every real connection by up to 33ms. */
@@ -128,6 +130,21 @@ const isNetGuest = () => isPvp();
 
 // True when this client mirrors the arena horizontally (the guest).
 const netMirrored = () => net.mirror;
+
+/* True while a blocking overlay is covering a live PvP match.
+
+   In PvP the pause menu never sets state.mode = 'pause', because the match
+   genuinely keeps running for the opponent - pausing locally would only desync
+   this client. The overlay's own visibility is therefore the only honest signal
+   that the player is in a menu rather than playing, and input has to be held
+   back while it is up.
+
+   The paddle is NOT abandoned to the server, which would be read as an idle
+   player and drift: the last aim keeps being sent, so it simply holds station
+   where it was left. */
+const netMenuOpen = () =>
+  isPvp() && typeof overlays === 'object' && !!overlays.pause &&
+  overlays.pause.classList.contains('visible');
 
 /* Server-recorded effects carry a side tag ('@side:left' / '@side:right')
    instead of a literal color, because side colors are a local preference and
@@ -150,14 +167,14 @@ function netEventColor(color, mirror) {
 /* Snapshots that arrive while the client is still setting up are dropped.
 
    Starting a PvP match runs transitionTo('match'), a ~650ms fade whose middle
-   step calls resetToMenu() — which nulls mouseY and rebuilds both paddles from
+   step calls resetToMenu() - which nulls mouseY and rebuilds both paddles from
    their initial state. The server, meanwhile, begins simulating the instant it
    sends match-start.
 
    Without this gate the first snapshots land during that window and set
    state.mode to 'countdown'/'play', so the update loop starts predicting from a
    paddle that resetToMenu is about to wipe. The result was a host paddle that
-   jittered and ignored the mouse until it was moved again — most visible on a
+   jittered and ignored the mouse until it was moved again - most visible on a
    quick requeue, where the fade runs while a match is already live. */
 function netSuspend() {
   net.settling = true;
@@ -170,7 +187,7 @@ function netResume() {
   net.ownY = null;
   /* resetToMenu() can clear mouseY, and netPredictLocalPaddle only follows the
      cursor when it holds a value. Without a mousemove the paddle would sit
-     still even though the player's pointer has not moved — they would have to
+     still even though the player's pointer has not moved - they would have to
      jiggle the mouse to "wake it up". Fall back to the in-arena cursor if one
      is known, so tracking is live the moment play resumes. */
   if (mouseY === null && mouseCY >= 0) mouseY = mouseCY;
@@ -187,7 +204,7 @@ function netStart(role) {
      racy: inputs sent moments before the rematch are still in flight and land
      in the new match's buffer carrying old, high numbers. Restarting the count
      at zero would make every subsequent input look stale, so the server would
-     ignore the player's aim entirely — the paddle stops tracking and only jerks
+     ignore the player's aim entirely - the paddle stops tracking and only jerks
      when a discrete action arrives.
 
      Keeping the counter monotonic for the lifetime of the page sidesteps the
@@ -201,6 +218,11 @@ function netStart(role) {
   net.ownY = null;
   net.ended = false;
   net.audio = {};
+  /* Cleared alongside net.audio: both hold the PREVIOUS snapshot's values, and
+     a stale one across a rematch would compare this match's opening scores
+     against the last match's final ones - firing a phantom pop on the first
+     packet of a fresh game. */
+  net.hud = {};
   // The caller runs a screen transition after this, which rebuilds paddle and
   // input state. Ignore the server until that has finished.
   net.settling = true;
@@ -260,7 +282,7 @@ function netApplySettings(settings) {
 /* ---------- outgoing input ---------- */
 /* Send the local player's input.
 
-   A queued click is always sent immediately — a smash window is far shorter
+   A queued click is always sent immediately - a smash window is far shorter
    than a frame, so it must never wait. Aim updates are rate limited instead.
 
    That distinction matters. mousemove fires at the mouse's poll rate, which on
@@ -280,7 +302,11 @@ function netSendInput(dt) {
   // horizontal axis is mirrored, so the vertical value maps across directly.
   const aimY = player.y + player.h / 2;
   const seq = ++net.seq;
-  roomSend({ t: 'i', seq, y: aimY, action: net.action });
+  /* While holding a ball the paddle is frozen and the controls aim the shot
+     instead, so the angle is the meaningful half of the input. It is sent as a
+     side-relative bounce angle and needs no mirroring: the server applies the
+     left/right sense from whichever side holds the ball. */
+  roomSend({ t: 'i', seq, y: aimY, am: net.aimAngle, action: net.action });
   // Remember it until the server confirms it, so the authoritative position can
   // be brought back up to date by replaying whatever is still in flight.
   net.pending.push({ seq, y: aimY, at: performance.now() });
@@ -302,6 +328,46 @@ function netLocalAudio(s, own, foe) {
   const scored = prev.scores && (own.score !== prev.scores[0] || foe.score !== prev.scores[1]);
   if (scored) (own.score > prev.scores[0] ? sfx.scoreFor : sfx.scoreAgainst)();
   net.audio = { rally: s.ra, scores: [own.score, foe.score], lives: s.lv, powerups: s.pu.length };
+}
+
+/* HUD punch animations, driven from the snapshot.
+
+   scorePop, timerPop and comboPunch are all set inside the simulation - by
+   score(), by the final-countdown tick, and by paddleBounce respectively. A PvP
+   client runs none of that: the server owns scoring and physics, so those
+   values were only ever decayed locally and never raised. The scoreboard
+   therefore updated its number without any of the animation around it.
+
+   They are pure presentation, so rather than widening the snapshot they are
+   re-derived here from values it already carries. Each is edge-triggered
+   against the previous packet, which is what makes them fire once per event
+   instead of continuously while the state holds. */
+function netHudPunches(s, own, foe) {
+  const prev = net.hud;
+
+  // Score pops. Compared per side, so a simultaneous change pops both.
+  if (prev.scores) {
+    if (own.score !== prev.scores[0]) scorePop.player = 1;
+    if (foe.score !== prev.scores[1]) scorePop.ai = 1;
+  }
+
+  /* Combo punch. comboLevel() is derived from the rally counter, so the level
+     can be recomputed locally and compared - no new snapshot field needed.
+     A rally reset (a goal) must not read as a level change. */
+  const level = Math.max(0, s.ra - COMBO_START);
+  if (prev.level !== undefined && level > prev.level) state.comboPunch = 1;
+
+  /* Timer tick. The local clock is interpolated between packets, so the pop is
+     triggered off the whole second the snapshot reports rather than off a local
+     countdown that would drift and double-fire. Final ten seconds only, matching
+     the single-player rule. */
+  const secs = Math.ceil(s.tl);
+  if (prev.secs !== undefined && secs !== prev.secs &&
+      secs <= 10 && secs > 0 && s.m === 'play') {
+    timerPop = 1;
+  }
+
+  net.hud = { scores: [own.score, foe.score], level, secs };
 }
 
 // Which acknowledgement field belongs to this client.
@@ -328,8 +394,8 @@ function netReconcileOwnPaddle(serverY, ackSeq) {
      rate. The buffer is additionally bounded here: however many entries are
      queued, replay may never move the paddle further than the speed limit
      allows over the time those inputs actually span. Without that bound a burst
-     of queued inputs — from a stall, a backgrounded tab, or a mouse reporting
-     faster than expected — would fabricate movement and yank the paddle. */
+     of queued inputs - from a stall, a backgrounded tab, or a mouse reporting
+     faster than expected - would fabricate movement and yank the paddle. */
   const step = NET_MAX_PADDLE_SPEED * (1 / 60);
   let y = serverY;
   let saturated = false;
@@ -342,7 +408,7 @@ function netReconcileOwnPaddle(serverY, ackSeq) {
   }
 
   /* If replay ran out of speed before reaching the requested aim, the result
-     depends on exactly how many inputs happened to be in flight — and that
+     depends on exactly how many inputs happened to be in flight - and that
      count alternates every frame as acks arrive. Reporting it would make the
      reference oscillate (measured: a 37px swing at 8Hz, large enough to trip
      the snap threshold and yank the paddle).
@@ -443,12 +509,25 @@ function netApplySnapshot(s) {
   const previous = new Map(balls.map(b => [b.id, b]));
   balls = s.b.map(([x, y, r, type, heldBy, speed, holdT, aimAngle, phase, vx, vy], i) => {
     const prior = previous.get(i);
+    const owner = swapHeld(heldBy || null);
+    /* The aim of a ball THIS player is holding is predicted locally and travels
+       to the server, not back from it. Adopting the snapshot value would drag
+       the arrow back to where the aim was a round trip ago, so it would lag and
+       stutter against the mouse at exactly the moment precision matters. Keep
+       the local prediction; the server is applying the same angle anyway. */
+    const localAim = owner === 'player' && net.aimAngle !== null;
     return {
-      id: i, x: mx(x), y, r, type, heldBy: swapHeld(heldBy || null),
+      id: i, x: mx(x), y, r, type, heldBy: owner,
       speed, holdT, phase,
-      // When mirrored, vx flips and the aim angle reflects across the vertical.
+      // When mirrored, vx flips. The aim angle does NOT: it is a side-relative
+      // BOUNCE angle (signed vertical deflection, same convention as
+      // paddleBounce), not an absolute heading. The left/right sense is applied
+      // separately - by `dir` in releaseBall, and by the `right` term in
+      // render.js - so reflecting it here as well double-flipped it, pushed the
+      // value outside the +/-MAX_BOUNCE_ANGLE band, and drew the guest's aim
+      // guide pointing the opposite way to where the shot actually went.
       vx: mirror ? -vx : vx, vy,
-      aimAngle: aimAngle ? (mirror ? Math.PI - aimAngle : aimAngle) : 0,
+      aimAngle: localAim ? net.aimAngle : (aimAngle || 0),
       split: false, portalCD: 0, catchCD: 0, chargeBeepT: 0, lastHit: null,
       // Carry the dead-reckoned render position across snapshots.
       rx: prior ? prior.rx : mx(x), ry: prior ? prior.ry : y,
@@ -500,6 +579,7 @@ function netApplySnapshot(s) {
   state.invertT = s.iv || 0;
 
   netLocalAudio(s, own, foe);
+  netHudPunches(s, own, foe);
 
   // Replay the effects the server recorded while simulating, mapped into this
   // client's view. Sounds are played locally rather than streamed.
@@ -521,6 +601,17 @@ function netApplySnapshot(s) {
       // Scoring cues are directional, and the server does not know which side
       // is "you": netLocalAudio already derives those from the score change.
       if (e.n !== 'scoreFor' && e.n !== 'scoreAgainst') sfx[e.n](...(e.a || []));
+    }
+    /* Synthesized tones. Much of the game's audio - the entire catch-zone
+       vocabulary, the combo ladder, bumpers, portals - is raw beeps rather than
+       samples, so these are as important as the sfx cues above.
+
+       A tone that was scheduled with setTimeout server-side carries its delay,
+       and is re-scheduled here so layered cues keep their shape instead of
+       collapsing into a single blip. */
+    else if (e.k === 'beep') {
+      if (e.dl > 0) setTimeout(() => beep(e.f, e.d, e.ty, e.v), e.dl);
+      else beep(e.f, e.d, e.ty, e.v);
     }
   }
 
@@ -555,7 +646,7 @@ function netInterpolate(dt) {
        into. The outcome of that contact is unknowable until the server says so:
        it may bounce, be caught, or be missed entirely. Extrapolating through it
        commits to "missed", and if the server actually returned the ball the
-       client is then wrong by twice the extrapolated distance — measured at
+       client is then wrong by twice the extrapolated distance - measured at
        over 500px, well past the 140px hard-snap threshold, which is exactly the
        teleporting that reads as the ball phasing through the paddle.
 
@@ -634,11 +725,49 @@ function netInterpolate(dt) {
    across the arena moves the paddle at ~7000px/s, while the server refuses
    anything above NET_MAX_PADDLE_SPEED. The client then runs far ahead of the
    authoritative position, the error grows past OWN_PADDLE_SNAP, and the paddle
-   is repeatedly snapped backwards — which is exactly what fast movement felt
+   is repeatedly snapped backwards - which is exactly what fast movement felt
    like. Clamping here keeps prediction and authority in agreement, so there is
    nothing to correct. */
+/* Aim a held ball locally and remember the angle for the next input packet.
+
+   This mirrors the human-aim branch in updateBalls, which a PvP client never
+   reaches: guests do not simulate, so without this the aim arrow would sit
+   frozen until the server echoed a change back - and the server has nothing to
+   echo, because the angle originates here.
+
+   Predicting it locally also keeps the guide responsive at any ping: the arrow
+   follows the mouse immediately and the server confirms it a round trip later.
+   The value is clamped to the same range the server enforces, so prediction and
+   authority cannot disagree. */
+function netPredictHeldAim(dt) {
+  const held = balls.find(b => b.heldBy === 'player');
+  if (!held) { net.aimAngle = null; return; }
+
+  const dir = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+  if (dir) {
+    mouseY = null;
+    held.aimAngle = clamp((held.aimAngle || 0) + dir * dt * 1.8, -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
+  } else if (mouseY !== null) {
+    /* Horizontal reach for the aim triangle. mouseCX is -1 whenever the cursor
+       is outside the arena, which would read as a very distant pointer and
+       flatten the shot; fall back to a fixed lead so aiming stays as responsive
+       off-canvas as the paddle itself. */
+    const reach = mouseCX >= 0 ? Math.abs(mouseCX - held.x) : 200;
+    held.aimAngle = clamp(Math.atan2(mouseY - held.y, Math.max(60, reach)),
+                          -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
+  }
+  net.aimAngle = held.aimAngle;
+}
+
 function netPredictLocalPaddle(dt) {
-  if (paddleHolds('player')) { player.vy = player.smoothVy = 0; return; }
+  /* Holding a ball freezes the paddle - the controls are aiming the shot
+     instead. Aim still has to be predicted, or the guide does not move. */
+  if (paddleHolds('player')) {
+    player.vy = player.smoothVy = 0;
+    netPredictHeldAim(dt);
+    return;
+  }
+  net.aimAngle = null;
   // Guard against a stale/absent height from early snapshots: a bad height
   // makes the clamp below collapse and pins the paddle in place.
   if (!(player.h > 0)) player.h = BASE_PADDLE_H;
@@ -667,8 +796,8 @@ function netPredictLocalPaddle(dt) {
 
      net.ownY is recomputed only when a snapshot arrives (30Hz), but prediction
      advances every frame (60Hz+). Left alone, the reference goes stale between
-     packets and the measured error alternates every frame — large, small,
-     large — so the correction applied in netInterpolate pulses and the paddle
+     packets and the measured error alternates every frame - large, small,
+     large - so the correction applied in netInterpolate pulses and the paddle
      visibly buzzes. Advancing it in lockstep keeps the comparison like-for-like
      between snapshots, leaving only genuine disagreement to correct. */
   if (net.ownY !== null) {

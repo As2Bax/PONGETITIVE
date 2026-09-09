@@ -68,7 +68,15 @@ function update(dt) {
   // host's snapshots, and forward input.
   if (isNetGuest()) {
     if (state.mode === 'play' || state.mode === 'countdown') {
-      netPredictLocalPaddle(dt);
+      /* The PvP pause menu is an overlay only: the match must keep running for
+         the other player, so state.mode deliberately stays 'play'. That means
+         nothing here stops reading the mouse, and the paddle kept tracking the
+         cursor while it was busy clicking menu buttons.
+
+         Prediction is skipped while the menu is up, so the paddle holds still.
+         Interpolation continues, because the world behind the overlay is still
+         live and must not freeze into a stale frame. */
+      if (!netMenuOpen()) netPredictLocalPaddle(dt);
       netInterpolate(dt);
       // Run presentation timers locally so HUD badges, the countdown pop and
       // field-event visuals animate every frame instead of only on packets.

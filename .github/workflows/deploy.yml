@@ -16,9 +16,6 @@ jobs:
         run: |
           cat > override.yml <<'EOF'
           services:
-            web:
-              ports: !override
-                - "8280:80"
             server:
               environment:
                 PONG_ALLOWED_ORIGINS: "https://pongetitive.as2bax.dev"

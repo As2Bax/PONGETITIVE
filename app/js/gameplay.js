@@ -26,7 +26,7 @@ function updatePlayer(dt) {
       player.y = clamp(player.y, topWall(), botWall() - player.h);
       return;
     }
-    // smooth exponential follow — no jitter, no teleporting
+    // smooth exponential follow - no jitter, no teleporting
     // (inversion curse mirrors the mouse target around center)
     const my = state.invertT > 0 ? (topWall() + botWall()) - inputY : inputY;
     const target = clamp(my - player.h / 2, topWall(), botWall() - player.h);
@@ -47,7 +47,7 @@ function paddleBounce(b, paddle, isPlayer) {
   const rel = clamp((b.y - center) / (paddle.h / 2), -1, 1);
   const angle = rel * MAX_BOUNCE_ANGLE;
   // normal speedup below the base cap; once the combo is carrying the ball
-  // beyond it, growth slows to a crawl — climbing, but never exploding.
+  // beyond it, growth slows to a crawl - climbing, but never exploding.
   // heavy balls barely accelerate at all.
   const spd = b.type === 'heavy' ? 1 + (cfg().speedup - 1) * 0.3 : cfg().speedup;
   if (b.speed < cfg().maxSpeed) {
@@ -94,7 +94,7 @@ function paddleBounce(b, paddle, isPlayer) {
   const newComboLevel = comboLevel();
   // Every combo level gets a visible HUD punch, including the first one.
   if (newComboLevel > priorComboLevel) state.comboPunch = 1;
-  // rising combo arpeggio — every hit past the threshold climbs a pentatonic
+  // rising combo arpeggio - every hit past the threshold climbs a pentatonic
   // ladder; a bright octave chime punctuates each 5th level
   if (state.rally > COMBO_START) {
     const lvl = comboLevel();
@@ -191,10 +191,10 @@ function chooseBotShot(b, who) {
     const wobbleY = () => (Math.random() * 2 - 1) * smear;
     const aimAt = (tx, ty) =>
       clamp(Math.atan2((ty + wobbleY()) - b.y, Math.max(40, direction * (tx - b.x))), -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
-    // gravity well: skim JUST past the core — never through it. A full-speed
+    // gravity well: skim JUST past the core - never through it. A full-speed
     // ball grazing the core keeps its pace but picks up a vicious late bend.
     // The pull is toward the core, so passing BELOW bends the ball UP and
-    // passing ABOVE bends it DOWN — pick the side with room for the curve:
+    // passing ABOVE bends it DOWN - pick the side with room for the curve:
     //   well sits low  -> skim below, the bend lifts the ball clear
     //   well sits high -> skim above, the bend dives it down
     //   well centered   -> free choice; bend away from the foe's paddle
@@ -211,7 +211,7 @@ function chooseBotShot(b, who) {
       });
       return aimAt(state.well.x, state.well.y + side * skim);
     }
-    // portals: fire into an entry whose EXIT is far from the foe's paddle —
+    // portals: fire into an entry whose EXIT is far from the foe's paddle -
     // the ball teleports across the arena away from their reach
     if (state.portals && state.portals.life > 1) {
       let bestPortal = null, bestGap = 150; // only bother if the exit is genuinely open
@@ -295,7 +295,7 @@ function catchBall(b, pad, who) {
   // ruthless bots always cook the catch to FULL charge; others improvise
   b.holdPlan = cfg().aiPerfect ? CHARGE_MAX : 0.7 + Math.random() * 1.5;
   // will this bot try to weaponise a well/portal on THIS shot? impossible
-  // always does; insane only dabbles — a nasty surprise, not a routine.
+  // always does; insane only dabbles - a nasty surprise, not a routine.
   b.fieldPlay = cfg().aiPerfect || (cfg().aiFieldPlay && Math.random() < 0.35);
   if (b.fieldPlay) debugLog('ai', `${debugParticipant(who)} is looking for an arena trick on this release`);
   pad.catchT = pad.smashT = 0;
@@ -338,7 +338,7 @@ function updateBalls(dt) {
           b.targetAngle = chooseBotShot(b, b.heldBy);
           b.aimThinkT = 0.2 + Math.random() * 0.15;
         }
-        // ruthless bots snap their aim twice as fast — still visible, but decisive
+        // ruthless bots snap their aim twice as fast - still visible, but decisive
         const aimStep = (cfg().aiPerfect ? 1.6 : 0.8) * dt;
         b.aimAngle += clamp(b.targetAngle - b.aimAngle, -aimStep, aimStep);
       } else {
@@ -363,7 +363,7 @@ function updateBalls(dt) {
     // gravity well STEERS the ball toward its core. The turn rate scales
     // with ball speed, making the *curvature per pixel traveled* constant:
     // a fast ball bends (and flips!) along the same geometric arc a slow
-    // one does — speed buys you nothing, the well doesn't care how fast
+    // one does - speed buys you nothing, the well doesn't care how fast
     // you're going when it decides to turn you around.
     if (state.well && !b.heldBy) {
       const dx = state.well.x - b.x, dy = state.well.y - b.y;
@@ -380,7 +380,7 @@ function updateBalls(dt) {
         const spdF = Math.max(sp0 / 500, 1); // equalise transit-time advantage
         const turn = clamp(diff, -1, 1) * WELL_TURN * strength * spdF * dt;
         // fighting the well's pull costs momentum: moving away from the core
-        // bleeds speed, curving in toward it wins a little back — so a ball
+        // bleeds speed, curving in toward it wins a little back - so a ball
         // can stall deep in the well, get whipped around, and slingshot out
         // the way it came. Bleed also scales with speed so fast balls pay
         // full toll during their brief visit.
@@ -464,7 +464,7 @@ function updateBalls(dt) {
       }
     }
 
-    // player paddle (right) — same swept test
+    // player paddle (right) - same swept test
     const pPlane = player.x - b.r;
     const pY = crossY(pPlane);
     if (b.vx > 0 &&
@@ -481,7 +481,7 @@ function updateBalls(dt) {
       }
     }
 
-    // ghost paddles (power-up) — same physics, in-field of the mains
+    // ghost paddles (power-up) - same physics, in-field of the mains
     if (ghostL.timer > 0 &&
         b.vx < 0 &&
         b.x - b.r <= ghostL.x + PADDLE_W &&
@@ -529,7 +529,7 @@ function updateBalls(dt) {
     }
     if (b.portalCD > 0) b.portalCD -= dt;
 
-    // scoring — off LEFT edge: player scores; off RIGHT edge: AI scores
+    // scoring - off LEFT edge: player scores; off RIGHT edge: AI scores
     let scored = null;
     if (b.x < -BALL_R * 3) scored = 'player';
     else if (b.x > W + BALL_R * 3) scored = 'ai';

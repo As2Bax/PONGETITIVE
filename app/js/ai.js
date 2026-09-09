@@ -1,7 +1,7 @@
 'use strict';
 
 /* ============================================================
-   AI  (left side — difficulty selects a relaxed, standard, sharp, or perfect brain)
+   AI  (left side - difficulty selects a relaxed, standard, sharp, or perfect brain)
    ============================================================ */
 function pickAiAim() {
   ai.aimOffset = (Math.random() * 2 - 1) * ai.h * 0.35;
@@ -47,13 +47,13 @@ function runBrain(pad, facing, brain, dt) {
 
   const mid = (topWall() + botWall()) / 2;
   let target, urgency;
-  let adrenaline = 0; // fast incoming ball — instincts kick in
+  let adrenaline = 0; // fast incoming ball - instincts kick in
 
   if (threat) {
     const plane = facing < 0 ? pad.x + PADDLE_W + BALL_R : pad.x - BALL_R;
     const eta = (plane - threat.x) / threat.vx;
 
-    // adrenaline: 0 at base ball speed, 1 near max — a screaming ball
+    // adrenaline: 0 at base ball speed, 1 near max - a screaming ball
     // sharpens reactions the way it would for a human
     adrenaline = clamp((threat.speed - cfg().ballSpeed) / (cfg().maxSpeed - cfg().ballSpeed), 0, 1);
 
@@ -74,7 +74,7 @@ function runBrain(pad, facing, brain, dt) {
       folded = ((folded % (2 * span)) + 2 * span) % (2 * span);
       py = (topWall() + BALL_R) + (folded > span ? 2 * span - folded : folded);
     } else {
-      // humans track the ball and extrapolate a little — they don't solve the
+      // humans track the ball and extrapolate a little - they don't solve the
       // full bounce path. Only a rough single-bounce guess.
       const look = Math.min(eta, brain.lookAhead);
       py = threat.y + threat.vy * look;
@@ -94,7 +94,7 @@ function runBrain(pad, facing, brain, dt) {
       target = py - rel * (pad.h / 2);
       urgency = 1.3;
     } else {
-      // the bad read fades as the ball closes in (late correction — often too late)
+      // the bad read fades as the ball closes in (late correction - often too late)
       const lapseFade = clamp(eta / 0.9, 0, 1);
       // focus under pressure: adrenaline damps the hand wobble a touch
       target = py + pad.noise * (1 - adrenaline * 0.5) + pad.lapse * lapseFade + pad.aimOffset * clamp(1 - eta, 0, 1);
@@ -119,7 +119,7 @@ function runBrain(pad, facing, brain, dt) {
 
   pad.targetY = clamp(target - pad.h / 2, topWall(), botWall() - pad.h);
 
-  // ease velocity toward target — accelerates, overshoots slightly, corrects.
+  // ease velocity toward target - accelerates, overshoots slightly, corrects.
   // adrenaline tightens the response: snappier acceleration, higher top speed.
   // Ruthless bots skip the human easing almost entirely: machine reflexes.
   const diff = pad.targetY - pad.y;

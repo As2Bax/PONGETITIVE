@@ -45,12 +45,12 @@ function roomConnect(action, code = '') {
       roomClient.code = message.code;
       roomClient.role = message.role;
       roomClient.ready = message.type === 'room-joined';
-      roomStatus(roomClient.role === 'host' ? 'WAITING FOR A PLAYER TO JOIN' : 'CONNECTED — WAITING FOR HOST');
+      roomStatus(roomClient.role === 'host' ? 'WAITING FOR A PLAYER TO JOIN' : 'CONNECTED - WAITING FOR HOST');
     } else if (message.type === 'peer-ready') {
       roomClient.ready = true;
       // Send the current lobby configuration to the newly joined guest.
       if (roomClient.role === 'host') netBroadcastSettings();
-      roomStatus(roomClient.role === 'host' ? 'PLAYER CONNECTED — READY TO START' : 'CONNECTED — WAITING FOR HOST');
+      roomStatus(roomClient.role === 'host' ? 'PLAYER CONNECTED - READY TO START' : 'CONNECTED - WAITING FOR HOST');
     } else if (message.type === 'match-start') {
       if (roomClient.role === 'guest') netApplySettings(message.settings);
       netStart(roomClient.role);
@@ -65,7 +65,7 @@ function roomConnect(action, code = '') {
       roomClient.socket.close();
       Object.assign(roomClient, { socket: null, code: '', role: null, ready: false });
       netStop();
-      roomStatus(wasHost ? 'PLAYER LEFT — ROOM CLOSED' : 'HOST LEFT — ROOM CLOSED', 'warn');
+      roomStatus(wasHost ? 'PLAYER LEFT - ROOM CLOSED' : 'HOST LEFT - ROOM CLOSED', 'warn');
       window.dispatchEvent(new CustomEvent('pong-room-ended'));
     } else if (message.type === 'error') {
       roomStatus(message.message || 'ROOM ERROR', 'error');

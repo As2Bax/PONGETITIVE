@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Press Start 2P "P" as an outline, so the icon needs no font download. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="PONGETITIVE">
+  <title>PONGETITIVE</title>
+  <path fill="#3fa294"
+        d="M4 60 L4 4 L52 4 L52 12 L60 12 L60 36 L52 36 L52 44 L20 44 L20 60 Z
+           M20 36 L44 36 L44 12 L20 12 Z"/>
+</svg>

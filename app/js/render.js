@@ -104,7 +104,7 @@ function draw() {
     ctx.stroke();
   }
 
-  // fog zone (insane) — visual hint of where the ball disappears
+  // fog zone (insane) - visual hint of where the ball disappears
   if (cfg().fog && !isAivai() && state.mode !== 'menu') {
     const fog = cfg().fog;
     const grad = ctx.createLinearGradient(W * fog.start, 0, W * fog.end, 0);
@@ -135,7 +135,7 @@ function draw() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ===== SCOREBOARD — drawn early, under the action, so play stays visible =====
+  // ===== SCOREBOARD - drawn early, under the action, so play stays visible =====
   ctx.textAlign = 'center';
   {
     // scores pop when someone scores: scale up + brighten, ease back.
@@ -223,7 +223,7 @@ function draw() {
     // Low-time urgency is carried by the pulsing red and the per-tick scale pop.
     ctx.fillStyle = low ? `rgba(255, 90, 90, ${0.6 + 0.4 * Math.sin(performance.now() / 150)})` : 'rgba(230, 240, 255, 0.9)';
     if (timerPop > 0) {
-      // punchy pop on every countdown tick — scales up hard, snaps back
+      // punchy pop on every countdown tick - scales up hard, snaps back
       ctx.save();
       ctx.translate(W / 2, 33);
       ctx.scale(1 + timerPop * 0.6, 1 + timerPop * 0.6);
@@ -241,7 +241,7 @@ function draw() {
     ctx.fillRect(-20, -20, W + 40, H + 40);
   }
 
-  // effect indicator badges — under the action so they never cover play
+  // effect indicator badges - under the action so they never cover play
   // corners = personal effects; bottom-center = GLOBAL effects (affect everyone)
   {
     hoveredBadge = null; // recomputed by drawBadge hover checks below
@@ -275,7 +275,7 @@ function draw() {
     }
     if (state.muted) drawBadge(rx, H - 40, '#8899bb', 'mute', '', 1);
 
-    // GLOBAL effects — centered row at the bottom
+    // GLOBAL effects - centered row at the bottom
     const globals = [];
     if (state.flipTimer > 0 && state.mode !== 'menu') {
       globals.push(['flip', Math.ceil(state.flipTimer), state.flipTimer / (state.flipPending ? 3 : 10), '#c98bbf']);
@@ -297,7 +297,7 @@ function draw() {
       }
     }
 
-    // rally combo — above the global effects row (or at the bottom if none)
+    // rally combo - above the global effects row (or at the bottom if none)
     if (state.rally >= COMBO_START && (state.mode === 'play' || state.mode === 'countdown')) {
       const baseY = globals.length > 0 ? H - 62 : H - 24;
       const lvl = comboLevel();
@@ -388,7 +388,7 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  // ghost paddles (power-up) — translucent, drawn under the mains so overlap reads;
+  // ghost paddles (power-up) - translucent, drawn under the mains so overlap reads;
   // blink when about to expire
   if (state.mode !== 'menu') {
     for (const [gh, fill] of [[ghostL, theme.left.ghost], [ghostR, theme.right.ghost]]) {
@@ -406,7 +406,7 @@ function draw() {
   // hitFlash makes them pop bright + slightly wider for a beat after contact
   ctx.fillStyle = ai.hitFlash > 0.5 ? theme.left.bright : theme.left.base;
   ctx.fillRect(ai.x - ai.hitFlash * 2, ai.y, PADDLE_W + ai.hitFlash * 4, ai.h);
-  // IMPOSSIBLE: your paddle flickers — phases toward invisibility in waves
+  // IMPOSSIBLE: your paddle flickers - phases toward invisibility in waves
   let playerAlpha = 1;
   if (cfg().flicker && !isAivai() && (state.mode === 'play' || state.mode === 'countdown')) {
     playerAlpha = 0.12 + 0.88 * Math.abs(Math.sin(performance.now() / 700));
@@ -416,7 +416,7 @@ function draw() {
   ctx.fillRect(player.x - player.hitFlash * 2, player.y, PADDLE_W + player.hitFlash * 4, player.h);
   ctx.globalAlpha = 1;
 
-  // gravity well — swirling violet vortex
+  // gravity well - swirling violet vortex
   if (state.well && state.mode !== 'menu') {
     const wl = state.well;
     const appear = clamp((WELL_LIFE - wl.life) / 0.8, 0, 1);
@@ -447,7 +447,7 @@ function draw() {
     ctx.restore();
   }
 
-  // wind gust — streaks ease in from still air and taper away before expiry.
+  // wind gust - streaks ease in from still air and taper away before expiry.
   if (state.wind !== 0 && state.mode !== 'menu') {
     const t = state.fieldTime;
     const dirn = Math.sign(state.wind);
@@ -467,7 +467,7 @@ function draw() {
     }
   }
 
-  // portals — each pair opens with a quick, smooth bloom
+  // portals - each pair opens with a quick, smooth bloom
   if (state.portals && state.mode !== 'menu') {
     const spawnAge = Math.max(0, state.fieldTime - (state.portals.spawnT ?? state.fieldTime));
     const enter = clamp(spawnAge / 0.35, 0, 1);
@@ -612,12 +612,36 @@ function draw() {
     }
   }
 
-  // armed smash: a white outline around the paddle that is ready to fire
-  for (const [pad, color] of [[ai, theme.left.base], [player, theme.right.base]]) {
+  /* Armed paddle: an outline around a paddle that is ready to act.
+
+     White is the smash. Gold is an armed CATCH, which had no outline at all -
+     the two windows are mutually exclusive (arming a catch zeroes smashT), so
+     during the catch zone the paddle simply went bare and there was no way to
+     tell an armed paddle from an idle one. Gold matches the rest of the catch
+     vocabulary: the CAUGHT!/RELEASE! popups, the charge ring and meter, and the
+     HUD badge are all #e3c15a.
+
+     The catch window is nearly twice the smash window (0.45s vs 0.25s), so it
+     fades with its remaining time rather than holding full strength - the
+     outline thins out as the chance to connect runs out. */
+  for (const pad of [ai, player]) {
     if (pad.smashT > 0) {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
       ctx.strokeRect(pad.x - 4, pad.y - 4, PADDLE_W + 8, pad.h + 8);
+    } else if (pad.catchT > 0) {
+      const t = clamp(pad.catchT / CATCH_WINDOW, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = 0.45 + t * 0.55;
+      ctx.strokeStyle = '#e3c15a';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(pad.x - 4, pad.y - 4, PADDLE_W + 8, pad.h + 8);
+      // A soft outer halo separates "ready to catch" from "ready to smash" at a
+      // glance, without reading as a second hard edge.
+      ctx.globalAlpha = t * 0.3;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(pad.x - 8, pad.y - 8, PADDLE_W + 16, pad.h + 16);
+      ctx.restore();
     }
   }
 
@@ -640,7 +664,7 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
-  // badge tooltip — drawn last so it reads over everything
+  // badge tooltip - drawn last so it reads over everything
   if (hoveredBadge) {
     const tip = BADGE_TIPS[hoveredBadge.icon];
     if (tip) {
@@ -675,7 +699,7 @@ function draw() {
     ctx.restore();
   }
 
-  // score flash — soft, warm-tinted, and quick to fade
+  // score flash - soft, warm-tinted, and quick to fade
   if (state.flash > 0) {
     ctx.fillStyle = `rgba(220, 230, 255, ${state.flash})`;
     ctx.fillRect(-20, -20, W + 40, H + 40);
@@ -686,7 +710,7 @@ function draw() {
 }
 
 /* ---------- indicator badges with icons ---------- */
-// what each badge means — shown as a hover tooltip
+// what each badge means - shown as a hover tooltip
 const BADGE_TIPS = {
   flip: 'FLIP: 3-second warning, then swapped sides for 10 seconds (global)',
   well:   'GRAVITY WELL: bends ball paths toward its core (global)',
@@ -695,9 +719,9 @@ const BADGE_TIPS = {
   shrink: 'SHRUNK: this side\'s paddle is reduced',
   slow:   'SLOW-MO: all balls at 55% speed (global)',
   charge: 'CATCH ZONE: LEFT-CLICK to arm catch; mouse or W/S aims; left-click again fires (global)',
-  smash:  'SMASH recharging — LEFT-CLICK arms a boosted return',
+  smash:  'SMASH recharging - LEFT-CLICK arms a boosted return',
   wear:   'PADDLE WEAR: your paddle shrinks each hit, resets on score',
-  mute:   'Sound muted — press M to unmute',
+  mute:   'Sound muted - press M to unmute',
   ghost:  'GHOST PADDLE: an AI helper defends this side',
 };
 let hoveredBadge = null;   // set during draw if the mouse is over a badge

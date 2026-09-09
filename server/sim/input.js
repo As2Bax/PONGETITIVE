@@ -29,6 +29,7 @@ const MAX_PENDING_ACTIONS = 16;
 export class InputBuffer {
   constructor() {
     this.aimY = null;         // latest requested paddle center (level)
+    this.aimAngle = null;     // latest requested held-ball aim angle (level)
     this.actions = [];        // pending discrete events (edges)
     this.lastSeq = 0;         // highest sequence number accepted
     this.ackSeq = 0;          // echoed back so the client can reconcile
@@ -39,7 +40,7 @@ export class InputBuffer {
    * Accept a validated input message.
    * Returns false if the packet was stale/duplicate and got ignored.
    */
-  accept({ seq, y, action }, nowMs) {
+  accept({ seq, y, am, action }, nowMs) {
     // Out-of-order or replayed packet: the newer state already supersedes it.
     // Actions still count, because dropping one loses a click forever; only
     // the aim level is order-sensitive.
@@ -51,6 +52,13 @@ export class InputBuffer {
       if (typeof y === 'number' && Number.isFinite(y)) {
         this.aimY = y;
         this.lastAimAt = nowMs;
+      }
+      /* Aim angle is a level too, so coalescing to the newest is correct. It
+         is kept separate from aimY because a held ball freezes the paddle:
+         during a catch the client keeps sending its paddle position, but the
+         angle is the only part the simulation still acts on. */
+      if (typeof am === 'number' && Number.isFinite(am)) {
+        this.aimAngle = am;
       }
     }
 
@@ -77,6 +85,7 @@ export class InputBuffer {
 
   reset() {
     this.aimY = null;
+    this.aimAngle = null;
     this.actions.length = 0;
     this.lastSeq = 0;
     this.ackSeq = 0;
