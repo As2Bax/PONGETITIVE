@@ -16,6 +16,7 @@ yarn-error.log*
 .vscode/
 .idea/
 .pi/
+test/
 *.swp
 .DS_Store
 Thumbs.db

@@ -61,41 +61,38 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
   }
 
-  // twinkling starfield
-  const now = performance.now() / 1000;
+  // starfield: static flat pixels. The background is texture only, so it holds
+  // still and the moving ball stays the one thing drawing the eye.
   for (const s of stars) {
-    const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(now * s.speed + s.phase));
-    ctx.fillStyle = `rgba(160, 190, 240, ${tw * 0.35})`;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = 'rgba(160, 190, 240, 0.13)';
+    const px = Math.round(s.x), py = Math.round(s.y);
+    ctx.fillRect(px, py, 2, 2);
   }
 
-  // goal glow zones — each side tinted in its owner's colour
-  let g = ctx.createLinearGradient(0, 0, 70, 0);
-  g.addColorStop(0, 'rgba(255, 79, 154, 0.10)');
-  g.addColorStop(1, 'rgba(255, 79, 154, 0)');
-  ctx.fillStyle = g;
+  // goal zones: a flat block per side, tinted in that side's color, with a
+  // hard inner edge. The edge marks where a ball counts as scored, so it is
+  // drawn as a crisp line rather than a soft fade.
+  ctx.fillStyle = theme.left.rgba(0.07);
   ctx.fillRect(0, 0, 70, H);
-  g = ctx.createLinearGradient(W - 70, 0, W, 0);
-  g.addColorStop(0, 'rgba(53, 224, 255, 0)');
-  g.addColorStop(1, 'rgba(53, 224, 255, 0.10)');
-  ctx.fillStyle = g;
+  ctx.fillStyle = theme.right.rgba(0.07);
   ctx.fillRect(W - 70, 0, 70, H);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = theme.left.rgba(0.3);
+  ctx.beginPath(); ctx.moveTo(70.5, 0); ctx.lineTo(70.5, H); ctx.stroke();
+  ctx.strokeStyle = theme.right.rgba(0.3);
+  ctx.beginPath(); ctx.moveTo(W - 70.5, 0); ctx.lineTo(W - 70.5, H); ctx.stroke();
 
-  // centre circle + face-off dot (hockey-rink style)
+  // center circle + face-off square (hockey-rink style)
   ctx.strokeStyle = 'rgba(120, 150, 200, 0.18)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(W / 2, H / 2, 70, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(W / 2, H / 2, 4, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(120, 150, 200, 0.25)';
-  ctx.fill();
+  ctx.fillRect(W / 2 - 4, H / 2 - 4, 8, 8);
 
-  // corner brackets — top corners only; the bottom corners belong to the
-  // effect badges, which the frames were colliding with
+  // corner brackets: top corners only. The bottom corners are reserved for
+  // the effect badges, which are drawn there later in the frame.
   ctx.strokeStyle = 'rgba(120, 150, 200, 0.3)';
   ctx.lineWidth = 3;
   const cb = 26, ci = 12;
@@ -123,15 +120,12 @@ function draw() {
     ctx.fillRect(0, 0, W, topWall());
     ctx.fillRect(0, botWall(), W, H - botWall());
     ctx.strokeStyle = 'rgba(255, 90, 90, 0.7)';
-    ctx.shadowColor = '#ff5a5a';
-    ctx.shadowBlur = 10;
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(0, topWall()); ctx.lineTo(W, topWall()); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, botWall()); ctx.lineTo(W, botWall()); ctx.stroke();
-    ctx.shadowBlur = 0;
   }
 
-  // centre line
+  // center line
   ctx.strokeStyle = 'rgba(120, 150, 200, 0.25)';
   ctx.lineWidth = 3;
   ctx.setLineDash([14, 16]);
@@ -146,10 +140,10 @@ function draw() {
   {
     // scores pop when someone scores: scale up + brighten, ease back.
     // Big scores shrink and shift outward so they never crowd the timer.
-    const drawScore = (value, side, popAmt, color, glow) => {
+    const drawScore = (value, side, popAmt, color) => {
       const digits = String(value).length;
       const fontSize = digits <= 2 ? 64 : digits === 3 ? 46 : 36;
-      const offset = 165 + Math.max(0, digits - 2) * 26; // clear of the centre timer
+      const offset = 165 + Math.max(0, digits - 2) * 26; // clear of the center timer
       const x = W / 2 + side * offset;
       const s = 1 + popAmt * popAmt * 0.55; // ease-in pop
       ctx.save();
@@ -157,45 +151,55 @@ function draw() {
       ctx.scale(s, s);
       ctx.font = `${fontSize}px "Press Start 2P", monospace`;
       ctx.fillStyle = popAmt > 0.4 ? '#ffffff' : color;
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = 18 + popAmt * 30;
       ctx.fillText(value, 0, 0);
       ctx.restore();
-      ctx.shadowBlur = 0;
       return x; // so the label follows
     };
 
     if (state.gameMode === 'survival') {
       // hearts on the left
       ctx.font = '28px monospace';
-      ctx.fillStyle = 'rgba(255, 79, 154, 0.9)';
-      ctx.shadowColor = '#ff4f9a';
-      ctx.shadowBlur = 12;
+      ctx.fillStyle = theme.left.rgba(0.9);
       let hearts = '';
       for (let i = 0; i < SURVIVAL_LIVES; i++) hearts += i < state.lives ? '\u2665 ' : '\u2661 ';
       ctx.fillText(hearts.trim(), W / 2 - 165, 84);
-      ctx.shadowBlur = 0;
     }
     let leftX = W / 2 - 165;
     if (state.gameMode !== 'survival') {
-      leftX = drawScore(state.scores.ai, -1, scorePop.ai, 'rgba(255, 79, 154, 0.85)', '#ff4f9a');
+      leftX = drawScore(state.scores.ai, -1, scorePop.ai, theme.left.rgba(0.85));
     }
-    const rightX = drawScore(state.scores.player, 1, scorePop.player, 'rgba(53, 224, 255, 0.85)', '#35e0ff');
+    const rightX = drawScore(state.scores.player, 1, scorePop.player, theme.right.rgba(0.85));
 
     // labels (track the score positions)
     ctx.font = '10px "Press Start 2P", monospace';
     ctx.fillStyle = 'rgba(120, 140, 175, 0.5)';
     ctx.fillText(state.gameMode === 'survival' ? 'LIVES' : foeName(), leftX, 120);
-    ctx.fillText(isAivai() ? 'CYAN' : 'YOU', rightX, 120);
+    ctx.fillText(isAivai() ? theme.right.name : 'YOU', rightX, 120);
   }
 
-  // top-centre HUD: timer / target / survival clock
+  /* PvP ping, sat just above the timer. Color-coded so it reads at a glance
+     without having to parse the number: green is unnoticeable, amber is
+     playable, red means the opponent's paddle will visibly lag behind where
+     they actually are. */
+  if (typeof isPvp === 'function' && isPvp() && net.ping !== null) {
+    const ms = Math.round(net.ping);
+    const color = ms < 60 ? 'rgba(102, 255, 140, 0.75)'
+      : ms < 130 ? 'rgba(255, 217, 80, 0.8)'
+      : 'rgba(255, 106, 106, 0.85)';
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.fillStyle = color;
+    /* Baseline 14 leaves ~8px of arena edge above the text and ~11px below it
+       before the timer's cap height begins. The timer scales up on every
+       countdown tick and grows upward, so this sits high enough that the two
+       lines still read as separate when it does. */
+    ctx.fillText(`${ms}MS`, W / 2, 14);
+  }
+
+  // top-center HUD: timer / target / survival clock
   ctx.font = '20px "Press Start 2P", monospace';
   if (state.suddenDeath) {
     const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 120);
     ctx.fillStyle = `rgba(255, 220, 80, ${pulse})`;
-    ctx.shadowColor = '#ffdc50';
-    ctx.shadowBlur = 14;
     ctx.fillText('SUDDEN DEATH', W / 2, 40);
   } else if (state.gameMode === 'survival' || state.gameMode === 'endless') {
     const t = Math.floor(state.survivalTime);
@@ -216,8 +220,8 @@ function draw() {
     const m = Math.floor(t / 60);
     const s = String(t % 60).padStart(2, '0');
     const low = state.timeLeft <= 10;
+    // Low-time urgency is carried by the pulsing red and the per-tick scale pop.
     ctx.fillStyle = low ? `rgba(255, 90, 90, ${0.6 + 0.4 * Math.sin(performance.now() / 150)})` : 'rgba(230, 240, 255, 0.9)';
-    if (low) { ctx.shadowColor = '#ff5a5a'; ctx.shadowBlur = 12 + timerPop * 20; }
     if (timerPop > 0) {
       // punchy pop on every countdown tick — scales up hard, snaps back
       ctx.save();
@@ -229,7 +233,6 @@ function draw() {
       ctx.fillText(`${m}:${s}`, W / 2, 40);
     }
   }
-  ctx.shadowBlur = 0;
 
 
   // slow-mo tint
@@ -239,15 +242,15 @@ function draw() {
   }
 
   // effect indicator badges — under the action so they never cover play
-  // corners = personal effects; bottom-centre = GLOBAL effects (affect everyone)
+  // corners = personal effects; bottom-center = GLOBAL effects (affect everyone)
   {
     hoveredBadge = null; // recomputed by drawBadge hover checks below
     // AI/left personal effects
     let lx = 22;
     for (const [icon, timer, maxT, color] of [
-      ['grow',   ai.growT,     EFFECT_DURATION, '#4dff88'],
-      ['shrink', ai.shrinkT,   EFFECT_DURATION, '#ff5a5a'],
-      ['ghost',  ghostL.timer, GHOST_DURATION,  '#9aecff'],
+      ['grow',   ai.growT,     EFFECT_DURATION, '#6fbf73'],
+      ['shrink', ai.shrinkT,   EFFECT_DURATION, '#cf5a4e'],
+      ['ghost',  ghostL.timer, GHOST_DURATION,  theme.left.ghost],
     ]) {
       if (timer > 0) { drawBadge(lx, H - 40, color, icon, Math.ceil(timer), timer / maxT); lx += 66; }
     }
@@ -255,9 +258,9 @@ function draw() {
     // player/right personal effects
     let rx = W - 80;
     for (const [icon, timer, maxT, color] of [
-      ['grow',   player.growT,   EFFECT_DURATION, '#4dff88'],
-      ['shrink', player.shrinkT, EFFECT_DURATION, '#ff5a5a'],
-      ['ghost',  ghostR.timer,   GHOST_DURATION,  '#9aecff'],
+      ['grow',   player.growT,   EFFECT_DURATION, '#6fbf73'],
+      ['shrink', player.shrinkT, EFFECT_DURATION, '#cf5a4e'],
+      ['ghost',  ghostR.timer,   GHOST_DURATION,  theme.right.ghost],
     ]) {
       if (timer > 0) { drawBadge(rx, H - 40, color, icon, Math.ceil(timer), timer / maxT); rx -= 66; }
     }
@@ -267,24 +270,24 @@ function draw() {
     }
     if (cfg().rallyShrink && player.rallyScale < 1 && state.mode === 'play') {
       rx -= 24; // wider badge
-      drawBadge(rx, H - 40, '#ff9950', 'wear', `${Math.round(player.rallyScale * 100)}%`, (player.rallyScale - RALLY_SHRINK_MIN) / (1 - RALLY_SHRINK_MIN));
+      drawBadge(rx, H - 40, '#cf8a52', 'wear', `${Math.round(player.rallyScale * 100)}%`, (player.rallyScale - RALLY_SHRINK_MIN) / (1 - RALLY_SHRINK_MIN));
       rx -= 66;
     }
     if (state.muted) drawBadge(rx, H - 40, '#8899bb', 'mute', '', 1);
 
-    // GLOBAL effects — centred row at the bottom
+    // GLOBAL effects — centered row at the bottom
     const globals = [];
     if (state.flipTimer > 0 && state.mode !== 'menu') {
-      globals.push(['flip', Math.ceil(state.flipTimer), state.flipTimer / (state.flipPending ? 3 : 10), '#ff9ee8']);
+      globals.push(['flip', Math.ceil(state.flipTimer), state.flipTimer / (state.flipPending ? 3 : 10), '#c98bbf']);
     }
     if (state.mode !== 'menu' && state.well) {
-      globals.push(['well', Math.ceil(state.well.life), state.well.life / WELL_LIFE, '#c46bff']);
+      globals.push(['well', Math.ceil(state.well.life), state.well.life / WELL_LIFE, '#9a72c4']);
     }
     if (state.mode !== 'menu' && state.wind !== 0 && state.windLife > 0) {
-      globals.push(['wind', Math.ceil(state.windLife), state.windLife / WIND_LIFE, '#9fd8ff']);
+      globals.push(['wind', Math.ceil(state.windLife), state.windLife / WIND_LIFE, '#9fbdd6']);
     }
-    if (state.slowTimer > 0) globals.push(['slow', Math.ceil(state.slowTimer), state.slowTimer / SLOW_DURATION, '#b06bff']);
-    if (state.chargeWindow > 0 && state.mode === 'play') globals.push(['charge', Math.ceil(state.chargeWindow), state.chargeWindow / CHARGE_WINDOW, '#ffe14d']);
+    if (state.slowTimer > 0) globals.push(['slow', Math.ceil(state.slowTimer), state.slowTimer / SLOW_DURATION, '#8f76c8']);
+    if (state.chargeWindow > 0 && state.mode === 'play') globals.push(['charge', Math.ceil(state.chargeWindow), state.chargeWindow / CHARGE_WINDOW, '#e3c15a']);
     if (globals.length > 0) {
       const bw = 66;
       let gx = W / 2 - (globals.length * bw - 8) / 2;
@@ -316,15 +319,12 @@ function draw() {
       ctx.translate(-W / 2, -comboY);
       ctx.font = `${size}px "Press Start 2P", monospace`;
       ctx.fillStyle = `rgba(${rC}, ${gC}, ${bC}, ${0.5 + 0.3 * Math.sin(performance.now() / 200) + punch * 0.12})`;
-      ctx.shadowColor = `rgb(${rC}, ${gC}, ${bC})`;
-      ctx.shadowBlur = 6 + heat * 14 + punch * 5;
       ctx.fillText(`COMBO ×${state.rally}`, W / 2, comboY);
       ctx.restore();
-      ctx.shadowBlur = 0;
     }
   }
 
-  // power-ups — bloom in instead of snapping abruptly onto the field
+  // power-ups: scale and fade in over ~0.28s as they appear
   for (const pu of powerups) {
     const t = POWERUP_TYPES[pu.type];
     const age = (performance.now() - pu.born) / 1000;
@@ -339,8 +339,6 @@ function draw() {
     ctx.translate(-pu.x, -pu.y);
     ctx.globalAlpha = fade;
     ctx.strokeStyle = t.color;
-    ctx.shadowColor = t.color;
-    ctx.shadowBlur = 14;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(pu.x, pu.y, POWERUP_R * pulse, 0, Math.PI * 2);
@@ -350,10 +348,8 @@ function draw() {
     ctx.font = compactLabel ? '12px "Press Start 2P", monospace' : 'bold 22px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowBlur = 5;
     ctx.fillStyle = t.color;
     ctx.fillText(t.label, pu.x, pu.y + (compactLabel ? 1 : 0), POWERUP_R * 1.65);
-    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
     ctx.restore();
   }
@@ -365,14 +361,11 @@ function draw() {
       const r = bp.r * (1 + bp.pulse * 0.2);
       ctx.fillStyle = '#141a2c';
       ctx.strokeStyle = `rgba(255, 217, 80, ${0.55 + bp.pulse * 0.45})`;
-      ctx.shadowColor = '#ffd950';
-      ctx.shadowBlur = 10 + bp.pulse * 18;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(bp.x, bp.y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.shadowBlur = 0;
     }
   }
 
@@ -398,37 +391,30 @@ function draw() {
   // ghost paddles (power-up) — translucent, drawn under the mains so overlap reads;
   // blink when about to expire
   if (state.mode !== 'menu') {
-    for (const [gh, glow, fill] of [[ghostL, '#ff4f9a', '#ff9ac4'], [ghostR, '#35e0ff', '#9aecff']]) {
+    for (const [gh, fill] of [[ghostL, theme.left.ghost], [ghostR, theme.right.ghost]]) {
       if (gh.timer <= 0) continue;
       const blink = gh.timer < 2 ? 0.15 + 0.3 * Math.abs(Math.sin(gh.timer * 6)) : 0.45;
       ctx.globalAlpha = blink;
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = glow;
       ctx.fillStyle = fill;
-      roundRect(gh.x, gh.y, PADDLE_W, gh.h, 6);
-      ctx.shadowBlur = 0;
+      ctx.fillRect(gh.x, gh.y, PADDLE_W, gh.h);
       ctx.globalAlpha = 1;
     }
   }
 
-  // paddles — AI (pink, left), player (cyan, right).
+  // paddles: the opponent holds the left side, you hold the right. Each takes
+  // its color from the player's chosen palette (see theme.js).
   // hitFlash makes them pop bright + slightly wider for a beat after contact
-  ctx.shadowBlur = 20 + ai.hitFlash * 18;
-  ctx.shadowColor = '#ff4f9a';
-  ctx.fillStyle = ai.hitFlash > 0.5 ? '#ffd0e4' : '#ff4f9a';
-  roundRect(ai.x - ai.hitFlash * 2, ai.y, PADDLE_W + ai.hitFlash * 4, ai.h, 6);
+  ctx.fillStyle = ai.hitFlash > 0.5 ? theme.left.bright : theme.left.base;
+  ctx.fillRect(ai.x - ai.hitFlash * 2, ai.y, PADDLE_W + ai.hitFlash * 4, ai.h);
   // IMPOSSIBLE: your paddle flickers — phases toward invisibility in waves
   let playerAlpha = 1;
   if (cfg().flicker && !isAivai() && (state.mode === 'play' || state.mode === 'countdown')) {
     playerAlpha = 0.12 + 0.88 * Math.abs(Math.sin(performance.now() / 700));
   }
   ctx.globalAlpha = playerAlpha;
-  ctx.shadowBlur = 20 + player.hitFlash * 18;
-  ctx.shadowColor = state.invertT > 0 ? '#ff5a5a' : '#35e0ff';
-  ctx.fillStyle = state.invertT > 0 ? '#ff5a5a' : (player.hitFlash > 0.5 ? '#d6f6ff' : '#35e0ff');
-  roundRect(player.x - player.hitFlash * 2, player.y, PADDLE_W + player.hitFlash * 4, player.h, 6);
+  ctx.fillStyle = state.invertT > 0 ? '#cf5a4e' : (player.hitFlash > 0.5 ? theme.right.bright : theme.right.base);
+  ctx.fillRect(player.x - player.hitFlash * 2, player.y, PADDLE_W + player.hitFlash * 4, player.h);
   ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
 
   // gravity well — swirling violet vortex
   if (state.well && state.mode !== 'menu') {
@@ -454,9 +440,7 @@ function draw() {
       ctx.stroke();
     }
     ctx.setLineDash([]);
-    ctx.fillStyle = '#c46bff';
-    ctx.shadowColor = '#c46bff';
-    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#9a72c4';
     ctx.beginPath();
     ctx.arc(wl.x, wl.y, 6 + Math.sin(t * 5) * 2, 0, Math.PI * 2);
     ctx.fill();
@@ -498,9 +482,7 @@ function draw() {
       ctx.scale(0.15 + 0.85 * easedEnter, 0.15 + 0.85 * easedEnter);
       ctx.translate(-p.x, -p.y);
       ctx.globalAlpha = blink;
-      ctx.strokeStyle = '#35ffc8';
-      ctx.shadowColor = '#35ffc8';
-      ctx.shadowBlur = 18;
+      ctx.strokeStyle = '#4fb59b';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, PORTAL_R * 0.55, PORTAL_R + wob, 0, 0, Math.PI * 2);
@@ -509,7 +491,6 @@ function draw() {
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, PORTAL_R * 0.3, (PORTAL_R + wob) * 0.6, 0, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
       ctx.restore();
     }
@@ -520,54 +501,39 @@ function draw() {
     for (const b of balls) {
       const a = ballAlpha(b) * phantomAlpha(b);
       ctx.globalAlpha = a;
-      ctx.shadowBlur = 16 * a;
       const fire = isFireball(b);
       if (b.type === 'gold') {
-        ctx.shadowColor = '#ffd950';
-        ctx.fillStyle = '#ffd950';
+        ctx.fillStyle = '#d9a441';
       } else if (b.type === 'phantom') {
-        ctx.shadowColor = '#be9fff';
-        ctx.fillStyle = '#d8c8ff';
+        ctx.fillStyle = '#c9c1e4';
       } else if (b.type === 'heavy') {
-        ctx.shadowColor = '#8899bb';
         ctx.fillStyle = '#aebdd4';
       } else if (b.type === 'comet') {
-        ctx.shadowColor = '#78dcff';
-        ctx.fillStyle = '#c8f2ff';
+        ctx.fillStyle = '#c3dbe8';
       } else if (b.type === 'splitter') {
-        ctx.shadowColor = '#66ff8c';
-        ctx.fillStyle = '#a8ffc0';
+        ctx.fillStyle = '#a9d9b4';
       } else if (fire) {
-        ctx.shadowColor = '#ff6a2a';
-        ctx.fillStyle = '#ffb46a';
+        ctx.fillStyle = '#e0a878';
       } else {
-        ctx.shadowColor = '#ffffff';
         ctx.fillStyle = '#ffffff';
       }
       // held & charging: pulsing gold ring that tightens as charge builds
       if (b.heldBy) {
         ctx.save();
         ctx.globalAlpha = 1;
-        ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
-        ctx.shadowBlur = 0;
         const cf = clamp(b.holdT / CHARGE_MAX, 0, 1);
         // Side-local charge meter and trajectory preview (same angle as release).
         const right = b.heldBy === 'player';
         const bx = right ? W - 12 : 6;
         ctx.fillStyle = '#263044';
-        roundRect(bx, H / 2 - 60, 6, 120, 3);
+        ctx.fillRect(bx, H / 2 - 60, 6, 120);
         const chargeHeight = cf * 120;
         if (chargeHeight > 0) {
-          ctx.fillStyle = '#ffe14d';
-          ctx.shadowColor = '#ffe14d';
-          ctx.shadowBlur = 4 + cf * 6;
-          roundRect(bx, H / 2 + 60 - chargeHeight, 6, chargeHeight,
-                    Math.min(3, chargeHeight / 2));
+          ctx.fillStyle = '#e3c15a';
+          ctx.fillRect(bx, H / 2 + 60 - chargeHeight, 6, chargeHeight);
         }
-        ctx.shadowBlur = 0;
         // Keep the aim guide subdued and clear of the paddle/charge ring.
         ctx.save();
-        ctx.shadowBlur = 0;
         ctx.strokeStyle = 'rgba(160, 170, 185, 0.45)';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([5, 7]);
@@ -591,8 +557,6 @@ function draw() {
         ctx.restore();
         const ringR = BALL_R + 14 - cf * 8 + Math.sin(performance.now() / 60) * 2;
         ctx.strokeStyle = `rgba(255, 225, 77, ${0.4 + cf * 0.6})`;
-        ctx.shadowColor = '#ffe14d';
-        ctx.shadowBlur = 8 + cf * 20;
         ctx.lineWidth = 2 + cf * 2;
         ctx.beginPath();
         ctx.arc(b.x, b.y, ringR, 0, Math.PI * 2);
@@ -601,7 +565,7 @@ function draw() {
           particles.push({
             x: b.x + (Math.random() - 0.5) * 30, y: b.y + (Math.random() - 0.5) * 30,
             vx: (b.x - (b.x + (Math.random() - 0.5) * 30)) * 8, vy: 0,
-            life: 0.2, maxLife: 0.2, color: '#ffe14d', size: 1.5 + Math.random() * 1.5,
+            life: 0.2, maxLife: 0.2, color: '#e3c15a', size: 1.5 + Math.random() * 1.5,
           });
         }
         ctx.restore();
@@ -640,24 +604,20 @@ function draw() {
           vx: -b.vx * 0.06 + (Math.random() - 0.5) * 60,
           vy: -b.vy * 0.06 + (Math.random() - 0.5) * 60,
           life: 0.3, maxLife: 0.3,
-          color: Math.random() < 0.5 ? '#ff6a2a' : '#ffd950',
+          color: Math.random() < 0.5 ? '#d1602f' : '#d9a441',
           size: 2 + Math.random() * 2,
         });
       }
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
   }
 
-  // smash glow on armed paddles / cooldown arc
-  for (const [pad, color] of [[ai, '#ff4f9a'], [player, '#35e0ff']]) {
+  // armed smash: a white outline around the paddle that is ready to fire
+  for (const [pad, color] of [[ai, theme.left.base], [player, theme.right.base]]) {
     if (pad.smashT > 0) {
       ctx.strokeStyle = '#ffffff';
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 22;
       ctx.lineWidth = 3;
       ctx.strokeRect(pad.x - 4, pad.y - 4, PADDLE_W + 8, pad.h + 8);
-      ctx.shadowBlur = 0;
     }
   }
 
@@ -666,20 +626,17 @@ function draw() {
     ctx.globalAlpha = clamp(p.life, 0, 1);
     ctx.font = `${p.size}px "Press Start 2P", monospace`;
     ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 10;
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     // Measure at render time: floating motion and late font loading must not
-    // push a popup outside the arena. Leave room for glow and camera shake.
+    // push a popup outside the arena. The inset also leaves room for camera shake.
     const inset = 28;
     const width = Math.min(ctx.measureText(p.str).width, W - inset * 2);
     const x = clamp(p.x, inset + width / 2, W - inset - width / 2);
     const y = clamp(p.y, inset + p.size / 2, H - inset - p.size / 2);
     ctx.fillText(p.str, x, y, W - inset * 2);
     ctx.restore();
-    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
   }
 
@@ -692,14 +649,15 @@ function draw() {
       const th = 26;
       let tx = clamp(hoveredBadge.x + hoveredBadge.w / 2 - tw / 2, 8, W - tw - 8);
       const ty = hoveredBadge.y - th - 8;
+      // Square plate. The stroke sits on the half-pixel grid so a 1px line
+      // lands exactly on one row of pixels and stays crisp.
       ctx.fillStyle = 'rgba(8, 10, 20, 0.95)';
       ctx.strokeStyle = hoveredBadge.color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(tx, ty, tw, th, 5) : ctx.rect(tx, ty, tw, th);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#e8f7ff';
+      ctx.lineWidth = 1;
+      tx = Math.round(tx);
+      ctx.fillRect(tx, ty, tw, th);
+      ctx.strokeRect(tx + 0.5, ty + 0.5, tw - 1, th - 1);
+      ctx.fillStyle = '#e8eefc';
       ctx.textAlign = 'center';
       ctx.fillText(tip, tx + tw / 2, ty + 17);
     }
@@ -713,11 +671,8 @@ function draw() {
     ctx.scale(scale, scale);
     ctx.font = '48px "Press Start 2P", monospace';
     ctx.fillStyle = `rgba(255, 255, 255, ${0.9 - countdownTimer * 0.5})`;
-    ctx.shadowColor = '#ffffff';
-    ctx.shadowBlur = 24;
     ctx.fillText(state.countdown, 0, 0);
     ctx.restore();
-    ctx.shadowBlur = 0;
   }
 
   // score flash — soft, warm-tinted, and quick to fade
@@ -750,34 +705,26 @@ let mouseCX = -1, mouseCY = -1; // mouse in canvas coords
 
 function drawBadge(x, y, color, icon, label, frac) {
   const str = String(label);
-  const bw = Math.max(58, 34 + str.length * 12), bh = 30, r = 8;
+  const bw = Math.max(58, 34 + str.length * 12), bh = 30;
   // hover detection for tooltips
   if (mouseCX >= x && mouseCX <= x + bw && mouseCY >= y && mouseCY <= y + bh) {
     hoveredBadge = { icon, x, y, w: bw, color };
   }
   ctx.save();
-  // pill background
+  // square background plate
   ctx.globalAlpha = 0.92;
   ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 12;
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + bw, y, x + bw, y + bh, r);
-  ctx.arcTo(x + bw, y + bh, x, y + bh, r);
-  ctx.arcTo(x, y + bh, x, y, r);
-  ctx.arcTo(x, y, x + bw, y, r);
-  ctx.fill();
-  ctx.stroke();
-  ctx.shadowBlur = 0;
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, bw, bh);
+  ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
 
-  // time-remaining bar along the bottom of the pill
+  // time-remaining bar, flush to the plate's bottom edge so it reads as the
+  // badge itself draining
   if (frac < 1) {
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.9;
-    ctx.fillRect(x + 4, y + bh - 5, (bw - 8) * clamp(frac, 0, 1), 3);
+    ctx.fillRect(x + 1, y + bh - 4, (bw - 2) * clamp(frac, 0, 1), 3);
   }
 
   // icon
@@ -786,7 +733,7 @@ function drawBadge(x, y, color, icon, label, frac) {
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
+  ctx.lineCap = 'butt'; // square ends: the icons are glyphs, not soft strokes
   switch (icon) {
     case 'grow': // paddle with outward arrows
       ctx.fillRect(cx - 2, cy - 8, 4, 16);
@@ -869,7 +816,7 @@ function drawBadge(x, y, color, icon, label, frac) {
   if (label !== '') {
     ctx.font = '11px "Press Start 2P", monospace';
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#e8f7ff';
+    ctx.fillStyle = '#e8eefc';
     ctx.fillText(label, x + 30, cy + 5);
     ctx.textAlign = 'center';
   }
@@ -891,13 +838,4 @@ function arrow(x, y, dx, dy) {
   ctx.stroke();
 }
 
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.fill();
-}
 

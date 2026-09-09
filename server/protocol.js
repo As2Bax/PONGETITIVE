@@ -1,7 +1,8 @@
 import { WebSocketServer } from 'ws';
 import { createRoom, findRoom, joinRoom, removeSocket, roomForSocket, roomCount } from './rooms.js';
-import { sanitizeRelay, sanitizeSettings, validRoomCode } from './validate.js';
+import { sanitizeInput, sanitizeLobbyRelay, sanitizeSettings, validRoomCode } from './validate.js';
 import { createBucket, takeToken, addConnection, releaseConnection } from './limits.js';
+import { AuthoritativeMatch } from './sim/match.js';
 import {
   ALLOWED_ORIGINS, CONTROL_BURST, CONTROL_RATE, HEARTBEAT_MS, MAX_PAYLOAD_BYTES,
   MAX_ROOMS, MAX_SOCKETS_PER_IP, RELAY_BURST, RELAY_RATE,
@@ -9,6 +10,39 @@ import {
 
 function send(socket, message) {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
+}
+
+/* Attach an authoritative simulation to a room. The server owns the match from
+   here on: it steps physics on a fixed timestep and pushes snapshots to BOTH
+   players, so the host and guest see the same world under the same latency. */
+function startAuthoritativeMatch(room, settings) {
+  room.match?.stop();
+
+  const broadcast = (snapshot) => {
+    // One serialisation for both recipients rather than two.
+    const frame = JSON.stringify({ type: 'relay', payload: snapshot });
+    for (const peer of [room.host, room.guest]) {
+      if (peer && peer.readyState === peer.OPEN) peer.send(frame);
+    }
+  };
+
+  room.match = new AuthoritativeMatch({
+    onSnapshot: broadcast,
+    onEnd: () => {
+      console.info(`[ROOM] ${room.code} match finished`);
+      room.match = null;
+    },
+  });
+
+  try {
+    room.match.start(settings);
+  } catch (err) {
+    console.error(`[ROOM] ${room.code} failed to start simulation:`, err.message);
+    room.match = null;
+    for (const peer of [room.host, room.guest]) {
+      if (peer) reject(peer, 'Could not start match');
+    }
+  }
 }
 
 function reject(socket, message) {
@@ -97,24 +131,39 @@ export function attachRoomProtocol(server) {
       }
 
       if (message.type === 'start') {
-        // Only the socket that owns the host slot may start the match.
+        // Only the socket that owns the host slot may start the match. This is
+        // the one asymmetry that survives server authority: the host still owns
+        // match configuration, but no longer owns the simulation.
         if (!room || room.host !== socket) return reject(socket, 'Only the host can start');
         if (!room.guest) return reject(socket, 'Waiting for another player');
         const settings = sanitizeSettings(message.settings);
         if (!settings) return reject(socket, 'Invalid settings');
+
         const start = { type: 'match-start', settings };
         send(room.host, start);
         send(room.guest, start);
         console.info(`[ROOM] ${room.code} match started`);
+
+        startAuthoritativeMatch(room, settings);
         return;
       }
 
       if (isRelay) {
         if (!room) return;
-        // Role decides which payloads are legal: a guest cannot forge snapshots
-        // or settings, and a host cannot forge the guest's input.
         const role = room.host === socket ? 'host' : 'guest';
-        const payload = sanitizeRelay(message.payload, role);
+
+        // During a match the only thing a client may send is its own input.
+        // Snapshots are produced here, so a client claiming to have one is
+        // ignored outright: neither side can author world state.
+        if (room.match) {
+          const input = sanitizeInput(message.payload);
+          if (input) room.match.applyInput(role, input);
+          return;
+        }
+
+        // Outside a match the only legal relay is the host pushing lobby
+        // settings to the guest.
+        const payload = sanitizeLobbyRelay(message.payload, role);
         if (!payload) return;
         const other = role === 'host' ? room.guest : room.host;
         if (other) send(other, { type: 'relay', payload });
@@ -128,6 +177,9 @@ export function attachRoomProtocol(server) {
       releaseConnection(session.ip);
       const removed = removeSocket(socket);
       if (!removed) return;
+      // Stop the simulation before dropping the room, or its interval would
+      // keep ticking a match nobody is watching.
+      removed.match?.stop();
       if (removed.other) send(removed.other, { type: 'peer-left' });
       console.info(`[ROOM] Removed ${removed.code}`);
     });

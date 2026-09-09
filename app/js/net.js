@@ -1,54 +1,213 @@
 'use strict';
 
 /* ============================================================
-   Host-authoritative netcode
+   Server-authoritative netcode
 
-   The host simulates the entire match and broadcasts snapshots.
-   The guest sends only its input and renders the authoritative state.
-   Guest drives the LEFT paddle; host drives the RIGHT paddle.
+   The SERVER simulates the match and is the single source of truth. Neither
+   player simulates it, so neither gains an advantage from being the host: both
+   sides send input, both sides receive the same snapshots under the same
+   latency.
+
+   Each client:
+     - predicts its own paddle locally, so aiming feels instant;
+     - replays unacknowledged input onto the server's position to reconcile;
+     - dead-reckons balls from the server's velocities between packets;
+     - extrapolates the opponent's paddle through the gaps between snapshots.
+
+   Sides. In the server's simulation the RIGHT paddle (`player`) belongs to the
+   room host and the LEFT paddle (`ai`) to the guest. Each client renders itself
+   on the right, so the guest mirrors its whole view horizontally and the host
+   does not. The vertical axis is never mirrored, so paddle Y maps straight
+   across.
+
+   Host vs guest is now purely a LOBBY distinction: the host owns match settings
+   and starts the game. It has no simulation privileges of any kind.
+
+   Sound is NOT sent over the wire. The server records the effects it produces
+   while simulating and ships them with the snapshot; each client plays them
+   locally.
    ============================================================ */
-const SNAPSHOT_HZ = 60;   // higher tick = far less visible stepping
+
 const INPUT_HZ = 60;
 const INTERP_RATE = 18;   // exponential convergence toward the newest snapshot
 const RECONCILE_RATE = 6; // how firmly dead-reckoned balls are pulled to truth
 
-// Queued host-side presentation events (see netEmit in core.js).
-const netEvents = [];
+/* Own-paddle reconciliation.
+
+   The naive approach — easing the paddle toward the position in the newest
+   snapshot — is wrong, and it is what made paddles jitter. That position
+   describes where the paddle was roughly one round trip ago, so while the
+   player is moving it is permanently behind. Easing toward it drags the paddle
+   backwards every frame while prediction pushes it forwards, and the two fight.
+
+   The correct approach is standard client-side prediction with server
+   reconciliation: keep every input that has not yet been acknowledged, and when
+   a snapshot arrives, take the server's position and REPLAY those pending
+   inputs on top of it. The result accounts for the server's authority *and*
+   everything the player has done since, so there is nothing to fight over. Any
+   residual difference is genuine disagreement and is eased away gently. */
+// Ease rate for leftover error after replay. Small, because replay should
+// already have removed nearly all of it.
+const OWN_PADDLE_RECONCILE = 6;
+// Beyond this the prediction is genuinely wrong (server refused a move, a flip
+// swapped sides, the paddle was resized) and a hard snap is correct.
+const OWN_PADDLE_SNAP = 90;
+// Deadzone. Rounding in the snapshot means tiny errors are noise, not truth;
+// chasing them would reintroduce the jitter this replaces.
+const OWN_PADDLE_DEADZONE = 1.5;
+// Safety cap on the replay buffer, in case acks stop arriving entirely.
+const MAX_PENDING_INPUTS = 120;
+/* Must equal MAX_PADDLE_SPEED in server/sim/match.js. Replay reproduces the
+   server's movement rule, so a mismatch would make the two disagree on every
+   frame and the paddle would feel spongy. test/jitter.test.js asserts they
+   remain in step. */
+const NET_MAX_PADDLE_SPEED = 1800;
 
 const net = {
   active: false,
-  role: null,           // 'host' | 'guest'
-  snapshotT: 0,
+  role: null,           // 'host' | 'guest' — lobby role only
+  mirror: false,        // guest mirrors its view so it sees itself on the right
+  seq: 0,               // outgoing input sequence number
+  pending: [],          // inputs sent but not yet acknowledged (for replay)
   inputT: 0,
-  remote: { y: null, action: false },          // latest guest input (host side)
-  action: false,                                // local click latch (guest side)
-  targets: null,        // guest: latest authoritative positions to ease toward
-  ended: false,         // guest: game-over overlay already shown
-  sentGameOver: false,  // host: final snapshot has been pushed
-  audio: {},            // guest: previous snapshot values used to trigger sound
+  action: false,        // local click latch
+  targets: null,        // opponent position/velocity used for extrapolation
+  ownY: null,           // authoritative own position, brought up to date
+  ended: false,         // game-over overlay already shown
+  audio: {},            // previous snapshot values used to trigger sound
+  ping: null,           // smoothed round-trip time in ms, null until measured
+  pingSamples: [],      // recent raw RTT samples, for a stable median
+  settling: false,      // true while a screen transition is rebuilding state
 };
 
+/* Ping is derived from data already on the wire. Every input carries a sequence
+   number and every snapshot echoes the highest one the server has consumed, so
+   the round trip is simply now - (time that input was sent).
+
+   No extra packets, no separate heartbeat: the measurement costs nothing.
+
+   Every raw sample is inflated by a variable amount of purely local delay: the
+   server only acknowledges up to its last consumed tick and holds that ack
+   until its next snapshot, and more packets sit in flight as latency rises. So
+   the overhead grows with latency and cannot be removed with a fixed constant.
+
+   Taking the MINIMUM over a short window sidesteps that. The fastest round trip
+   in the window is the one that happened to queue least, which is the closest
+   estimate of true network latency available — the same reason ping utilities
+   report a minimum alongside the average. */
+/* Samples considered when picking the minimum. A couple of seconds' worth: long
+   enough to contain a low-overhead sample, short enough to follow real changes
+   in connection quality. */
+const PING_WINDOW = 24;
+
+function netRecordPing(sentAt) {
+  const rtt = performance.now() - sentAt;
+  if (!(rtt >= 0) || rtt > 5000) return;   // ignore nonsense (clock jumps, stalls)
+  net.pingSamples.push(rtt);
+  if (net.pingSamples.length > PING_WINDOW) net.pingSamples.shift();
+  /* No constant is subtracted here. An ack is sometimes held until the next
+     snapshot and sometimes ships immediately, so the overhead is variable, not
+     fixed — measured against the real server the best sample on localhost is
+     ~1ms, meaning the hold frequently does not apply at all. Taking the minimum
+     already selects those samples; subtracting an interval on top would
+     under-report every real connection by up to 33ms. */
+  const best = Math.min(...net.pingSamples);
+  // Ease toward the new figure so the display does not flicker between values.
+  net.ping = net.ping === null ? best : net.ping + (best - net.ping) * 0.25;
+}
+
 const isPvp = () => state.opponent === 'pvp' && net.active;
-const isNetHost = () => isPvp() && net.role === 'host';
-const isNetGuest = () => isPvp() && net.role === 'guest';
+
+/* Nobody simulates locally in PvP any more, so isNetHost() is permanently
+   false. It is kept because core.js, gameplay.js and update.js branch on it to
+   mean "I am running the simulation myself", which is still a meaningful
+   question in single-player and AI-vs-AI. */
+const isNetHost = () => false;
+// "I render an authoritative feed", which is true for BOTH players in a PvP match.
+const isNetGuest = () => isPvp();
+
+// True when this client mirrors the arena horizontally (the guest).
+const netMirrored = () => net.mirror;
+
+/* Server-recorded effects carry a side tag ('@side:left' / '@side:right')
+   instead of a literal color, because side colors are a local preference and
+   each player must keep their own.
+
+   The tag names the side in the SERVER's frame, where the host is always
+   `right`. A mirrored client (the guest) sees itself on the right, so the tag
+   is flipped before it is resolved. Otherwise a guest would paint its own
+   goal sparks in its opponent's color.
+
+   Anything that is not a tag (pickup and ball colors, which are identity, not
+   ownership) passes through untouched. */
+function netEventColor(color, mirror) {
+  if (typeof color !== 'string' || !color.startsWith('@side:')) return color;
+  let side = color.slice(6) === 'right' ? 'right' : 'left';
+  if (mirror) side = side === 'right' ? 'left' : 'right';
+  return theme[side].base;
+}
+
+/* Snapshots that arrive while the client is still setting up are dropped.
+
+   Starting a PvP match runs transitionTo('match'), a ~650ms fade whose middle
+   step calls resetToMenu() — which nulls mouseY and rebuilds both paddles from
+   their initial state. The server, meanwhile, begins simulating the instant it
+   sends match-start.
+
+   Without this gate the first snapshots land during that window and set
+   state.mode to 'countdown'/'play', so the update loop starts predicting from a
+   paddle that resetToMenu is about to wipe. The result was a host paddle that
+   jittered and ignored the mouse until it was moved again — most visible on a
+   quick requeue, where the fade runs while a match is already live. */
+function netSuspend() {
+  net.settling = true;
+}
+
+function netResume() {
+  net.settling = false;
+  // Adopt the authoritative paddle position immediately rather than easing from
+  // wherever the reset left it.
+  net.ownY = null;
+  /* resetToMenu() can clear mouseY, and netPredictLocalPaddle only follows the
+     cursor when it holds a value. Without a mousemove the paddle would sit
+     still even though the player's pointer has not moved — they would have to
+     jiggle the mouse to "wake it up". Fall back to the in-arena cursor if one
+     is known, so tracking is live the moment play resumes. */
+  if (mouseY === null && mouseCY >= 0) mouseY = mouseCY;
+}
 
 function netStart(role) {
   net.active = true;
   net.role = role;
-  net.snapshotT = net.inputT = 0;
-  net.remote = { y: null, action: false };
+  // The host owns the RIGHT paddle and needs no mirroring; the guest owns the
+  // LEFT paddle and mirrors so it also sees itself on the right.
+  net.mirror = role === 'guest';
+  /* Sequence numbers are deliberately NOT reset. The server rejects any input
+     whose sequence is not greater than the last it accepted, and a requeue is
+     racy: inputs sent moments before the rematch are still in flight and land
+     in the new match's buffer carrying old, high numbers. Restarting the count
+     at zero would make every subsequent input look stale, so the server would
+     ignore the player's aim entirely — the paddle stops tracking and only jerks
+     when a discrete action arrives.
+
+     Keeping the counter monotonic for the lifetime of the page sidesteps the
+     race completely: a new match's inputs always outrank anything left over. */
+  net.pending = [];
+  net.ping = null;
+  net.pingSamples = [];
+  net.inputT = 0;
   net.action = false;
   net.targets = null;
-  netEvents.length = 0;
+  net.ownY = null;
   net.ended = false;
-  net.sentGameOver = false;
   net.audio = {};
-  if (role === 'guest') {
-    // Start from a sane local paddle so movement works before snapshot #1.
-    player.h = BASE_PADDLE_H;
-    player.y = H / 2 - player.h / 2;
-    player.vy = player.smoothVy = 0;
-  }
+  // The caller runs a screen transition after this, which rebuilds paddle and
+  // input state. Ignore the server until that has finished.
+  net.settling = true;
+  // Start from a sane local paddle so movement works before snapshot #1.
+  player.h = BASE_PADDLE_H;
+  player.y = H / 2 - player.h / 2;
+  player.vy = player.smoothVy = 0;
   debugLog('game', `NET: match started as ${role.toUpperCase()}`);
 }
 
@@ -57,9 +216,14 @@ function netStop() {
   net.active = false;
   net.role = null;
   net.targets = null;
+  net.ownY = null;
+  net.mirror = false;
+  net.pending = [];
+  net.ping = null;
+  net.pingSamples = [];
 }
 
-/* ---------- settings sync (host -> guest) ---------- */
+/* ---------- settings sync (host -> guest, lobby only) ---------- */
 function netSettings() {
   return {
     gameMode: state.gameMode,
@@ -93,136 +257,188 @@ function netApplySettings(settings) {
   debugLog('game', 'NET: applied host settings', settings);
 }
 
-/* ---------- guest input ---------- */
+/* ---------- outgoing input ---------- */
+/* Send the local player's input.
+
+   A queued click is always sent immediately — a smash window is far shorter
+   than a frame, so it must never wait. Aim updates are rate limited instead.
+
+   That distinction matters. mousemove fires at the mouse's poll rate, which on
+   a gaming mouse is 500-1000Hz, i.e. up to ~16 events per rendered frame. If
+   each one queued a pending input, the replay buffer would fill with entries
+   the server will never process as separate ticks, and replaying them would
+   fabricate thousands of pixels of movement in a 560px arena. */
 function netSendInput(dt) {
   net.inputT -= dt;
-  // A click must never be swallowed by the send throttle: smash timing is only
-  // a fraction of a second, so send immediately when an action is pending.
+  // A pending click always goes out at once. Aim updates wait for their slot,
+  // no matter how often the mouse reports, so the pending buffer stays in step
+  // with the server's tick rate.
   if (net.inputT > 0 && !net.action) return;
   net.inputT = 1 / INPUT_HZ;
-  // Send the predicted paddle centre: the host mirrors sides but not the
-  // vertical axis, so the value maps directly onto its left paddle.
-  roomSend({ t: 'i', y: player.y + player.h / 2, a: net.action });
+
+  // Report the predicted paddle center in SERVER coordinates. Only the
+  // horizontal axis is mirrored, so the vertical value maps across directly.
+  const aimY = player.y + player.h / 2;
+  const seq = ++net.seq;
+  roomSend({ t: 'i', seq, y: aimY, action: net.action });
+  // Remember it until the server confirms it, so the authoritative position can
+  // be brought back up to date by replaying whatever is still in flight.
+  net.pending.push({ seq, y: aimY, at: performance.now() });
+  if (net.pending.length > MAX_PENDING_INPUTS) {
+    net.pending.splice(0, net.pending.length - MAX_PENDING_INPUTS);
+  }
   net.action = false;
 }
 
-// Host moves the guest's paddle from the last input it received.
-function netDriveRemotePaddle(dt) {
-  const pad = ai;
-  if (paddleHolds('ai')) { pad.vy = pad.smoothVy = 0; return; }
-  pad.h = paddleHeight(pad);
-  const prevY = pad.y;
-  // The guest predicts locally and reports an absolute paddle centre, so the
-  // host follows that position directly rather than re-simulating its input.
-  if (net.remote.y !== null) {
-    const target = clamp(net.remote.y - pad.h / 2, topWall(), botWall() - pad.h);
-    // Snap when a ball is about to arrive: easing toward a latency-delayed
-    // position leaves the paddle behind, and the ball passes through where the
-    // guest already sees it. The guest's own view stays authoritative here.
-    const incoming = balls.some(b => !b.heldBy && b.vx < 0 && b.x - pad.x < 130);
-    pad.y += (target - pad.y) * (incoming ? 1 : Math.min(1, 28 * dt));
-  } else {
-    pad.vy *= Math.max(0, 1 - 10 * dt);
-  }
-  pad.y = clamp(pad.y, topWall(), botWall() - pad.h);
-  pad.smoothVy += ((pad.y - prevY) / Math.max(dt, 1e-4) - pad.smoothVy) * Math.min(1, 14 * dt);
+/* Each client owns its own audio. The server records every cue it produces
+   while simulating and ships them in the snapshot, so playback is driven by
+   those events rather than by streaming tones.
 
-  if (net.remote.action) {
-    net.remote.action = false;
-    const held = balls.find(b => b.heldBy === 'ai');
-    if (held) releaseBall(held);
-    else if (state.chargeWindow > 0) pad.catchT = CATCH_WINDOW;
-    else if (pad.smashCD <= 0 && pad.smashT <= 0) pad.smashT = SMASH_WINDOW;
-  }
-}
-
-/* ---------- snapshots ---------- */
-function netSendSnapshot(dt, force = false) {
-  net.snapshotT -= dt;
-  if (net.snapshotT > 0 && !force) return;
-  net.snapshotT = 1 / SNAPSHOT_HZ;
-  roomSend({
-    t: 's',
-    m: state.mode,
-    c: state.countdown,
-    tl: Math.round(state.timeLeft * 10) / 10,
-    sc: [state.scores.player, state.scores.ai],
-    lv: state.lives,
-    ra: state.rally,
-    zt: Math.round(state.zoneTop), zb: Math.round(state.zoneBottom),
-    p: [Math.round(player.y), Math.round(player.h), Math.round(player.growT * 10) / 10, Math.round(player.shrinkT * 10) / 10, Math.round(player.hitFlash * 100) / 100],
-    a: [Math.round(ai.y), Math.round(ai.h), Math.round(ai.growT * 10) / 10, Math.round(ai.shrinkT * 10) / 10, Math.round(ai.hitFlash * 100) / 100],
-    g: [Math.round(ghostL.y), Math.round(ghostL.h), Math.round(ghostL.timer * 10) / 10,
-        Math.round(ghostR.y), Math.round(ghostR.h), Math.round(ghostR.timer * 10) / 10],
-    b: balls.map(b => [Math.round(b.x), Math.round(b.y), Math.round(b.r), b.type, b.heldBy || 0,
-                       Math.round(b.speed), Math.round(b.holdT * 100) / 100,
-                       Math.round((b.aimAngle || 0) * 100) / 100, Math.round(b.phase * 100) / 100,
-                       Math.round(b.vx), Math.round(b.vy)]),
-    pu: powerups.map(p => [Math.round(p.x), Math.round(p.y), p.type, Math.round(p.life * 10) / 10]),
-    bp: state.bumpers.map(p => [Math.round(p.x), Math.round(p.y), Math.round(p.r)]),
-    po: state.portals ? [Math.round(state.portals.a.x), Math.round(state.portals.a.y),
-                         Math.round(state.portals.b.x), Math.round(state.portals.b.y),
-                         Math.round(state.portals.life * 10) / 10] : 0,
-    we: state.well ? [Math.round(state.well.x), Math.round(state.well.y), Math.round(state.well.life * 10) / 10] : 0,
-    wi: [Math.round(state.wind), Math.round(state.windLife * 10) / 10],
-    ch: Math.round(state.chargeWindow * 10) / 10,
-    sl: Math.round(state.slowTimer * 10) / 10,
-    sd: state.suddenDeath ? 1 : 0,
-    wv: state.wave,
-    st: Math.round(state.survivalTime * 10) / 10,
-    sh: Math.round(state.shake * 10) / 10,
-    fl: Math.round(state.flash * 100) / 100,
-    ev: netEvents.splice(0),
-  });
-}
-
-/* The guest owns its own audio. Sound is presentation, not simulation, so it is
-   derived from changes in the authoritative state rather than streamed as
-   individual tones over the socket. */
-function netLocalAudio(s) {
+   Scoring is the exception: "scored for" vs "conceded" is relative to the
+   listener, and the server has no notion of which client is which, so that cue
+   is derived from the score change here. */
+function netLocalAudio(s, own, foe) {
   const prev = net.audio;
+  const scored = prev.scores && (own.score !== prev.scores[0] || foe.score !== prev.scores[1]);
+  if (scored) (own.score > prev.scores[0] ? sfx.scoreFor : sfx.scoreAgainst)();
+  net.audio = { rally: s.ra, scores: [own.score, foe.score], lives: s.lv, powerups: s.pu.length };
+}
 
-  if (prev.rally !== undefined && s.ra > prev.rally) sfx.paddle();
-  const scored = prev.scores && (s.sc[0] !== prev.scores[0] || s.sc[1] !== prev.scores[1]);
-  // The guest's own side is the host's left paddle (index 0).
-  if (scored) (s.sc[0] > prev.scores[0] ? sfx.scoreFor : sfx.scoreAgainst)();
-  if (prev.lives !== undefined && s.lv < prev.lives) sfx.life();
-  if (prev.powerups !== undefined && s.pu.length < prev.powerups && !scored) sfx.power();
+// Which acknowledgement field belongs to this client.
+function netOwnAck(s) {
+  const ack = net.role === 'host' ? s.ah : s.ag;
+  return typeof ack === 'number' ? ack : 0;
+}
 
-  net.audio = { rally: s.ra, scores: [s.sc[0], s.sc[1]], lives: s.lv, powerups: s.pu.length };
+/* Bring the server's (necessarily stale) paddle position up to the present by
+   replaying every input it had not yet seen.
+
+   This mirrors AuthoritativeMatch.movePaddle: same speed cap, same clamping.
+   If the two ever drift apart the paddle will feel spongy, so they are kept
+   deliberately identical and covered by test/jitter.test.js. */
+function netReconcileOwnPaddle(serverY, ackSeq) {
+  // Drop inputs the server has already accounted for, timing the newest one to
+  // measure the round trip.
+  let acked = null;
+  while (net.pending.length && net.pending[0].seq <= ackSeq) acked = net.pending.shift();
+  if (acked) netRecordPing(acked.at);
+
+  /* Replay what is still in flight. Each pending input corresponds to one
+     server tick, because netSendInput is rate limited to the server's tick
+     rate. The buffer is additionally bounded here: however many entries are
+     queued, replay may never move the paddle further than the speed limit
+     allows over the time those inputs actually span. Without that bound a burst
+     of queued inputs — from a stall, a backgrounded tab, or a mouse reporting
+     faster than expected — would fabricate movement and yank the paddle. */
+  const step = NET_MAX_PADDLE_SPEED * (1 / 60);
+  let y = serverY;
+  let saturated = false;
+  for (const input of net.pending) {
+    const target = clamp(input.y - player.h / 2, topWall(), botWall() - player.h);
+    const delta = target - y;
+    if (Math.abs(delta) <= step) y = target;
+    else { y += Math.sign(delta) * step; saturated = true; }
+    y = clamp(y, topWall(), botWall() - player.h);
+  }
+
+  /* If replay ran out of speed before reaching the requested aim, the result
+     depends on exactly how many inputs happened to be in flight — and that
+     count alternates every frame as acks arrive. Reporting it would make the
+     reference oscillate (measured: a 37px swing at 8Hz, large enough to trip
+     the snap threshold and yank the paddle).
+
+     A saturated replay means the server is simply behind and has not yet caught
+     up with where the player is pointing. The prediction is the better estimate
+     in that case, so no correction is claimed. */
+  if (saturated) return null;
+  return clamp(y, topWall(), botWall() - player.h);
 }
 
 function netApplySnapshot(s) {
-  // The guest is the LEFT paddle in the host's simulation, so its whole view is
-  // mirrored: both players then see themselves on the right of their own screen.
-  const mx = (x) => W - x;
-  const swapHeld = (held) => held === 'player' ? 'ai' : held === 'ai' ? 'player' : null;
+  /* Resolve which side of the snapshot is "me".
 
-  // Follow the host's countdown so "3-2-1-GO" is in lockstep on both screens.
-  // Resetting the local tick timer restarts the per-number pop animation.
-  if (state.countdown !== s.c && s.m === 'countdown' && s.c > 0) { sfx.count(); countdownTimer = 0; }
-  if (state.mode === 'countdown' && s.m === 'play') sfx.go();
+     The server always simulates the host as `player` (right) and the guest as
+     `ai` (left). A client renders itself on the right, so the guest swaps the
+     two slots and mirrors X; the host takes them as-is. */
+  const mirror = netMirrored();
+  const mx = mirror ? (x) => W - x : (x) => x;
+  const swapHeld = mirror
+    ? (held) => held === 'player' ? 'ai' : held === 'ai' ? 'player' : null
+    : (held) => held || null;
+
+  const own = mirror
+    ? { pad: s.a, score: s.sc[1] }
+    : { pad: s.p, score: s.sc[0] };
+  const foe = mirror
+    ? { pad: s.p, score: s.sc[0] }
+    : { pad: s.a, score: s.sc[1] };
+
+  // Follow the server's countdown so "3-2-1-GO" is in lockstep on both screens.
+  // A snapshot arrives *after* a number has begun, so seed its elapsed time
+  // instead of resetting it to zero each time; otherwise the number stays fully
+  // opaque and the countdown animation appears frozen. The audio cue itself
+  // arrives as an event from the server.
+  if (state.countdown !== s.c && s.m === 'countdown' && s.c > 0) countdownTimer = 0;
   state.mode = s.m;
   state.countdown = s.c;
   state.timeLeft = s.tl;
-  state.scores.player = s.sc[1];
-  state.scores.ai = s.sc[0];
+  state.scores.player = own.score;
+  state.scores.ai = foe.score;
   state.lives = s.lv;
   state.rally = s.ra;
   state.zoneTop = s.zt;
   state.zoneBottom = s.zb;
-  // The guest IS the host's left paddle (s.a); the host's own paddle (s.p) is
-  // the opponent. Own paddle stays locally predicted: only its size is applied.
-  player.h = s.a[1];
-  player.growT = s.a[2]; player.shrinkT = s.a[3]; player.hitFlash = s.a[4];
-  ai.h = s.p[1];
-  ai.growT = s.p[2]; ai.shrinkT = s.p[3]; ai.hitFlash = s.p[4];
-  if (net.targets) net.targets.aiY = s.p[0];
-  // Ghost helpers mirror sides along with everything else.
-  ghostL.y = s.g[3]; ghostL.h = s.g[4]; ghostL.timer = s.g[5];
-  ghostR.y = s.g[0]; ghostR.h = s.g[1]; ghostR.timer = s.g[2];
-  ghostL.x = W - (W - PADDLE_MARGIN - PADDLE_W - GHOST_OFFSET) - PADDLE_W;
-  ghostR.x = W - (PADDLE_MARGIN + GHOST_OFFSET) - PADDLE_W;
+
+  // Own paddle stays locally predicted; only its size and effects are applied.
+  player.h = own.pad[1];
+  player.growT = own.pad[2]; player.shrinkT = own.pad[3]; player.hitFlash = own.pad[4];
+  /* Ability windows. These drive the armed-paddle glow and the cooldown badge,
+     so without them pressing smash produces no visible feedback whatsoever and
+     the ability feels like it simply does not work. Older snapshots omit them,
+     hence the length guard. */
+  if (own.pad.length > 5) {
+    player.smashT = own.pad[5]; player.smashCD = own.pad[6]; player.catchT = own.pad[7];
+  }
+  net.ownY = netReconcileOwnPaddle(own.pad[0], netOwnAck(s));
+
+  ai.h = foe.pad[1];
+  ai.growT = foe.pad[2]; ai.shrinkT = foe.pad[3]; ai.hitFlash = foe.pad[4];
+  if (foe.pad.length > 5) {
+    ai.smashT = foe.pad[5]; ai.smashCD = foe.pad[6]; ai.catchT = foe.pad[7];
+  }
+
+  /* Track how fast the opponent is moving between snapshots so the gap can be
+     extrapolated rather than merely chased. Snapshots arrive at 30Hz but the
+     screen redraws at 60+; easing toward a target that only changes every other
+     frame makes the paddle decelerate, jump, decelerate, jump. Estimating its
+     velocity lets it travel smoothly through the gap. */
+  const nowMs = performance.now();
+  const prevTarget = net.targets;
+  let foeVy = 0;
+  if (prevTarget) {
+    const gap = (nowMs - prevTarget.at) / 1000;
+    // Ignore absurd gaps (tab was backgrounded) and division blow-ups.
+    if (gap > 0.004 && gap < 0.5) {
+      const raw = (foe.pad[0] - prevTarget.aiY) / gap;
+      // Smooth the estimate: snapshot Y is rounded to whole pixels, so a raw
+      // difference is noisy enough to reintroduce the stutter it removes.
+      foeVy = prevTarget.vy + (raw - prevTarget.vy) * 0.5;
+    }
+  }
+  net.targets = { aiY: foe.pad[0], vy: foeVy, at: nowMs };
+
+  // Ghost helpers follow the same side mapping as the paddles.
+  if (mirror) {
+    ghostL.y = s.g[3]; ghostL.h = s.g[4]; ghostL.timer = s.g[5];
+    ghostR.y = s.g[0]; ghostR.h = s.g[1]; ghostR.timer = s.g[2];
+    ghostL.x = W - (W - PADDLE_MARGIN - PADDLE_W - GHOST_OFFSET) - PADDLE_W;
+    ghostR.x = W - (PADDLE_MARGIN + GHOST_OFFSET) - PADDLE_W;
+  } else {
+    ghostL.y = s.g[0]; ghostL.h = s.g[1]; ghostL.timer = s.g[2];
+    ghostR.y = s.g[3]; ghostR.h = s.g[4]; ghostR.timer = s.g[5];
+    ghostL.x = PADDLE_MARGIN + GHOST_OFFSET;
+    ghostR.x = W - PADDLE_MARGIN - PADDLE_W - GHOST_OFFSET;
+  }
 
   const previous = new Map(balls.map(b => [b.id, b]));
   balls = s.b.map(([x, y, r, type, heldBy, speed, holdT, aimAngle, phase, vx, vy], i) => {
@@ -230,15 +446,15 @@ function netApplySnapshot(s) {
     return {
       id: i, x: mx(x), y, r, type, heldBy: swapHeld(heldBy || null),
       speed, holdT, phase,
-      // Mirrored horizontally: vx flips, aim angle reflects across vertical axis.
-      vx: -vx, vy, aimAngle: aimAngle ? Math.PI - aimAngle : 0,
+      // When mirrored, vx flips and the aim angle reflects across the vertical.
+      vx: mirror ? -vx : vx, vy,
+      aimAngle: aimAngle ? (mirror ? Math.PI - aimAngle : aimAngle) : 0,
       split: false, portalCD: 0, catchCD: 0, chargeBeepT: 0, lastHit: null,
-      // Render position eases in from the previous frame to hide 60 Hz steps.
+      // Carry the dead-reckoned render position across snapshots.
       rx: prior ? prior.rx : mx(x), ry: prior ? prior.ry : y,
       wallCD: prior ? prior.wallCD : 0,
     };
   });
-  net.targets = { aiY: s.p[0] };
 
   // Reuse existing pickups: rebuilding them every snapshot resets their birth
   // time, which freezes the idle pulse and restarts the spawn bloom endlessly.
@@ -267,32 +483,60 @@ function netApplySnapshot(s) {
   state.suddenDeath = !!s.sd;
   state.wave = s.wv;
   state.survivalTime = s.st;
-  state.shake = Math.max(state.shake, s.sh);
-  state.flash = Math.max(state.flash, s.fl);
+  /* Screen shake and the goal flash decay in render.js, i.e. per drawn frame,
+     not per simulation tick. The server decays them too, so the snapshot value
+     is a genuine current level and is taken as-is. Merging with Math.max would
+     mean the value could only ever rise: between two packets the renderer
+     removes a little and the next packet puts it straight back, which produced
+     a permanent strobe after the first goal. */
+  state.shake = s.sh;
+  state.flash = s.fl;
+  /* Side swap. This is a render transform, not a change of ownership, so it
+     composes with the guest's own mirroring: a flipped arena looks swapped to
+     both players while each still controls the same paddle. */
+  state.flipped = !!s.fd;
+  state.flipPending = !!s.fp;
+  state.flipTimer = s.ft || 0;
+  state.invertT = s.iv || 0;
 
-  netLocalAudio(s);
+  netLocalAudio(s, own, foe);
 
-  // Replay the host's presentation events locally (mirrored to this view).
+  // Replay the effects the server recorded while simulating, mapped into this
+  // client's view. Sounds are played locally rather than streamed.
   for (const e of s.ev || []) {
-    if (e.k === 'particles') spawnParticles(mx(e.x), e.y, e.c, e.n, e.p);
-    else if (e.k === 'ripple') ripple(mx(e.x), e.y, e.c, e.r, e.w);
-    else if (e.k === 'popup') popup(mx(e.x), e.y, e.s, e.c, e.z);
-
+    const c = netEventColor(e.c, mirror);
+    if (e.k === 'particles') spawnParticles(mx(e.x), e.y, c, e.n, e.p);
+    else if (e.k === 'ripple') ripple(mx(e.x), e.y, c, e.r, e.w);
+    else if (e.k === 'popup') popup(mx(e.x), e.y, e.s, c, e.z);
+    else if (e.k === 'burst') {
+      /* Directional, so the angle must be reflected for a mirrored view as well
+         as the position. Reflecting across the vertical axis maps a heading of
+         a to (PI - a), which keeps the burst flying away from the paddle that
+         produced it instead of back into it. */
+      const opts = { ...e.o };
+      if (mirror && typeof opts.angle === 'number') opts.angle = Math.PI - opts.angle;
+      spawnBurst(mx(e.x), e.y, c, opts);
+    }
+    else if (e.k === 'sfx' && typeof sfx[e.n] === 'function') {
+      // Scoring cues are directional, and the server does not know which side
+      // is "you": netLocalAudio already derives those from the score change.
+      if (e.n !== 'scoreFor' && e.n !== 'scoreAgainst') sfx[e.n](...(e.a || []));
+    }
   }
 
-  // Only the host simulates, so the guest shows the result from the snapshot.
+  // The server owns the result, so both clients show it from the snapshot.
   if (s.m === 'over' && !net.ended) {
     net.ended = true;
-    endMatch();
+    endMatch({ fromNetwork: true });
   } else if (s.m !== 'over') {
     net.ended = false;
   }
 }
 
-// Guest-side smoothing. Interpolating alone always renders the past, so balls
-// visibly trail. Instead the guest keeps simulating each ball from the host's
-// last known velocity and continuously reconciles that dead-reckoned position
-// toward the newest authoritative one.
+// Client-side smoothing. Interpolating alone always renders the past, so balls
+// visibly trail. Instead each client keeps simulating every ball from the
+// server's last known velocity and continuously reconciles that dead-reckoned
+// position toward the newest authoritative one.
 function netInterpolate(dt) {
   if (!net.targets) return;
   const slow = state.slowTimer > 0 ? SLOW_FACTOR : 1;
@@ -307,18 +551,38 @@ function netInterpolate(dt) {
       b.rx = b.x; b.ry = b.y;
       continue;
     }
-    // Predict forward, then bounce off the live walls so the motion stays
-    // plausible between packets.
-    b.rx += b.vx * slow * dt;
-    b.ry += b.vy * slow * dt;
-    // Wall taps aren't derivable from snapshot fields, so the guest raises them
-    // from its own prediction bouncing off the live walls.
+    /* Predict forward, but never across a paddle plane the ball is heading
+       into. The outcome of that contact is unknowable until the server says so:
+       it may bounce, be caught, or be missed entirely. Extrapolating through it
+       commits to "missed", and if the server actually returned the ball the
+       client is then wrong by twice the extrapolated distance — measured at
+       over 500px, well past the 140px hard-snap threshold, which is exactly the
+       teleporting that reads as the ball phasing through the paddle.
+
+       Holding at the plane instead keeps the error to a few pixels in the worst
+       case, and the next snapshot resolves it either way. */
+    const nextX = b.rx + b.vx * slow * dt;
+    const nextY = b.ry + b.vy * slow * dt;
+    let blocked = false;
+    for (const pad of [player, ai]) {
+      const towards = pad === ai ? b.vx < 0 : b.vx > 0;
+      if (!towards) continue;
+      const face = pad === ai ? pad.x + PADDLE_W + b.r : pad.x - b.r;
+      const crossing = pad === ai ? (b.rx >= face && nextX < face)
+                                  : (b.rx <= face && nextX > face);
+      if (!crossing) continue;
+      // Only a contact the paddle could actually make counts.
+      if (nextY + b.r < pad.y || nextY - b.r > pad.y + pad.h) continue;
+      b.rx = face;
+      blocked = true;
+      break;
+    }
+    if (!blocked) b.rx = nextX;
+    b.ry = nextY;
+
     b.wallCD = Math.max(0, (b.wallCD || 0) - dt);
-    const tapped = (b.ry - b.r < topWall()) || (b.ry + b.r > botWall());
     if (b.ry - b.r < topWall()) { b.ry = topWall() + b.r; b.vy = Math.abs(b.vy); }
     if (b.ry + b.r > botWall()) { b.ry = botWall() - b.r; b.vy = -Math.abs(b.vy); }
-    // Cooldown stops reconciliation nudges from retriggering the same tap.
-    if (tapped && b.wallCD === 0) { sfx.wall(); b.wallCD = 0.08; }
 
     // Gently pull the prediction back to the server position. A hard snap is
     // reserved for large errors (teleports, portals, scoring resets).
@@ -335,10 +599,44 @@ function netInterpolate(dt) {
     b.x = b.rx; b.y = b.ry;
   }
 
-  ai.y += (net.targets.aiY - ai.y) * Math.min(1, INTERP_RATE * dt);
+  /* Opponent paddle: extrapolate, then converge.
+
+     The authoritative position is advanced by the opponent's estimated velocity
+     so it keeps moving between packets, and the rendered paddle eases toward
+     that moving target. Without the extrapolation the target is stationary for
+     half the frames and the paddle visibly stutters. */
+  const foe = net.targets;
+  foe.aiY += foe.vy * dt;
+  // Never let extrapolation push the paddle outside the arena.
+  foe.aiY = clamp(foe.aiY, topWall(), botWall() - ai.h);
+  ai.y += (foe.aiY - ai.y) * Math.min(1, INTERP_RATE * dt);
+
+  /* Reconcile our own paddle against the replayed authoritative position.
+
+     net.ownY is not the raw snapshot value: pending inputs have already been
+     replayed onto it, so it represents where the server WILL have the paddle
+     once everything in flight is processed. Comparing against that is an
+     apples-to-apples check, and while the player moves steadily the error stays
+     near zero instead of trailing by a round trip. */
+  if (net.ownY !== null && !paddleHolds('player')) {
+    const err = net.ownY - player.y;
+    if (Math.abs(err) > OWN_PADDLE_SNAP) player.y = net.ownY;
+    else if (Math.abs(err) > OWN_PADDLE_DEADZONE) {
+      player.y += err * Math.min(1, OWN_PADDLE_RECONCILE * dt);
+    }
+  }
 }
 
-// The guest predicts its own paddle locally so its input feels instant.
+/* Each client predicts its own paddle locally so its input feels instant.
+
+   The prediction MUST obey the same speed limit the server enforces. Mouse
+   aiming uses an exponential follow, which is not speed-limited at all: a flick
+   across the arena moves the paddle at ~7000px/s, while the server refuses
+   anything above NET_MAX_PADDLE_SPEED. The client then runs far ahead of the
+   authoritative position, the error grows past OWN_PADDLE_SNAP, and the paddle
+   is repeatedly snapped backwards — which is exactly what fast movement felt
+   like. Clamping here keeps prediction and authority in agreement, so there is
+   nothing to correct. */
 function netPredictLocalPaddle(dt) {
   if (paddleHolds('player')) { player.vy = player.smoothVy = 0; return; }
   // Guard against a stale/absent height from early snapshots: a bad height
@@ -358,7 +656,25 @@ function netPredictLocalPaddle(dt) {
   } else {
     player.vy *= Math.max(0, 1 - 10 * dt);
   }
+  // Same rule as the server's movePaddle, applied to whatever the controls
+  // produced above.
+  const step = player.y - prevY;
+  const maxStep = NET_MAX_PADDLE_SPEED * dt;
+  if (Math.abs(step) > maxStep) player.y = prevY + Math.sign(step) * maxStep;
   player.y = clamp(player.y, topWall(), botWall() - player.h);
+
+  /* Carry the authoritative reference forward by the same amount.
+
+     net.ownY is recomputed only when a snapshot arrives (30Hz), but prediction
+     advances every frame (60Hz+). Left alone, the reference goes stale between
+     packets and the measured error alternates every frame — large, small,
+     large — so the correction applied in netInterpolate pulses and the paddle
+     visibly buzzes. Advancing it in lockstep keeps the comparison like-for-like
+     between snapshots, leaving only genuine disagreement to correct. */
+  if (net.ownY !== null) {
+    net.ownY = clamp(net.ownY + (player.y - prevY), topWall(), botWall() - player.h);
+  }
+
   player.smoothVy += ((player.y - prevY) / Math.max(dt, 1e-4) - player.smoothVy) * Math.min(1, 14 * dt);
 }
 
@@ -369,12 +685,9 @@ function netHandleMessage(message) {
     netApplySettings(message.s);
     return;
   }
-  if (message.t === 'i' && isNetHost()) {
-    net.remote.y = message.y;
-    if (message.a) net.remote.action = true;
-  } else if (message.t === 's' && isNetGuest()) {
-    netApplySnapshot(message);
-  }
+  // Snapshots are ignored while a transition is rebuilding local state; the
+  // next one arrives within ~33ms of it finishing.
+  if (message.t === 's' && isNetGuest() && !net.settling) netApplySnapshot(message);
 }
 
 // Host: push the current lobby configuration to the guest on every change.

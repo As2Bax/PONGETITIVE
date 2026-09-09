@@ -7,7 +7,8 @@ const DIFFICULTIES = new Set(['relaxed', 'easy', 'normal', 'hard', 'insane', 'im
 const MATCH_TIMES = new Set([30, 60, 120, 180, 360]);
 const PADDLE_SIZES = new Set(['big', 'normal', 'small', 'tiny']);
 const BALL_SPEEDS = new Set(['slow', 'normal', 'fast', 'ludicrous']);
-const CUSTOM_FLAGS = new Set(['wear', 'fog', 'flicker', 'inverted', 'aiPerfect', 'barrier', 'portals', 'well', 'wind']);
+const CUSTOM_FLAGS = new Set(['wear', 'fog', 'flicker', 'inverted', 'barrier', 'portals', 'well', 'wind']);
+const AI_SKILLS = new Set(['chill', 'standard', 'sharp', 'perfect']);
 const BALL_TYPES = new Set(['gold', 'phantom', 'heavy', 'splitter', 'comet']);
 const POWERUPS = new Set(['grow', 'shrink', 'multi', 'mega', 'slow', 'ghost', 'charge', 'flip']);
 
@@ -38,6 +39,7 @@ export function sanitizeSettings(settings) {
     matchTime: MATCH_TIMES.has(settings.matchTime) ? settings.matchTime : 60,
     custom: {
       paddle: PADDLE_SIZES.has(custom.paddle) ? custom.paddle : 'normal',
+      aiSkill: AI_SKILLS.has(custom.aiSkill) ? custom.aiSkill : 'standard',
       speed: BALL_SPEEDS.has(custom.speed) ? custom.speed : 'normal',
       balls: sanitizeFlagMap(custom.balls, BALL_TYPES),
       powerups: sanitizeFlagMap(custom.powerups, POWERUPS),
@@ -47,30 +49,34 @@ export function sanitizeSettings(settings) {
   return clean;
 }
 
-/* Gameplay payloads. Only two shapes exist: guest input and host snapshots.
-   Both are re-encoded so no extra fields survive the trip. */
-export function sanitizeRelay(payload, senderRole) {
+/* Server-authoritative input. BOTH roles may send this: under server authority
+   the host is just another player, with no simulation privileges. Settings and
+   match-start remain host-only, which is enforced in protocol.js.
+
+   The payload is rebuilt field by field, so a client cannot smuggle extra
+   properties into the simulation. */
+export function sanitizeInput(payload) {
+  if (!isObject(payload) || payload.t !== 'i') return null;
+  const y = Number(payload.y);
+  const seq = Number(payload.seq);
+  return {
+    t: 'i',
+    // A non-finite or absent aim means "no change", not a teleport to NaN.
+    y: Number.isFinite(y) ? y : null,
+    seq: Number.isFinite(seq) && seq >= 0 ? Math.floor(seq) : 0,
+    action: payload.action === true || payload.a === true,
+  };
+}
+
+/* Lobby relay. Once a match is running every client message is input, handled
+   by sanitizeInput above. The only payload that still needs forwarding between
+   players is the host pushing its settings to the guest.
+
+   World state is never relayed: the server simulates it, so a client offering
+   a snapshot has nothing legitimate to say and is rejected here. */
+export function sanitizeLobbyRelay(payload, senderRole) {
   if (!isObject(payload)) return null;
 
-  // Guest -> host: paddle position and a click latch.
-  if (payload.t === 'i') {
-    if (senderRole !== 'guest') return null;
-    const y = Number(payload.y);
-    return { t: 'i', y: Number.isFinite(y) ? y : null, a: payload.a === true };
-  }
-
-  // Host -> guest: authoritative snapshot. Bound the arrays so a malicious host
-  // cannot force the opponent to allocate unbounded state.
-  if (payload.t === 's') {
-    if (senderRole !== 'host') return null;
-    if (Array.isArray(payload.b) && payload.b.length > 64) return null;
-    if (Array.isArray(payload.pu) && payload.pu.length > 32) return null;
-    if (Array.isArray(payload.bp) && payload.bp.length > 16) return null;
-    if (Array.isArray(payload.ev) && payload.ev.length > 64) return null;
-    return payload;
-  }
-
-  // Host -> guest: lobby settings.
   if (payload.t === 'cfg') {
     if (senderRole !== 'host') return null;
     const s = sanitizeSettings(payload.s);

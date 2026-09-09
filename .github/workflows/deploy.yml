@@ -1,0 +1,27 @@
+name: Deploy PONGETITIVE
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy PONGETITIVE
+        run: |
+          cat > override.yml <<'EOF'
+          services:
+            web:
+              ports: !override
+                - "8280:80"
+            server:
+              environment:
+                PONG_ALLOWED_ORIGINS: "https://pongetitive.as2bax.dev"
+          EOF
+          docker compose -f docker-compose.yml -f override.yml down
+          docker compose -f docker-compose.yml -f override.yml up -d --build

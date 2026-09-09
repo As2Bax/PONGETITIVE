@@ -1,8 +1,8 @@
 {
-  "name": "pong-server",
+  "name": "pongetitive-server",
   "version": "1.0.0",
   "private": true,
-  "description": "Room server for the browser Pong game (Player vs Player lobbies and relay).",
+  "description": "Room server for PONGETITIVE (Player vs Player lobbies and relay).",
   "type": "module",
   "license": "MIT",
   "author": "As2Bax",
@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
+    "dev": "npx --yes serve app -l 8280",
     "check": "node --check server/index.js && node --check server/protocol.js && node --check server/rooms.js && node --check server/validate.js && node --check server/limits.js && node --check server/config.js"
   },
   "dependencies": {

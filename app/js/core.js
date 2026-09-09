@@ -1,8 +1,9 @@
 'use strict';
 
 /* ============================================================
-   PONG — You vs AI
-   Player on the RIGHT, AI on the LEFT.
+   PONGETITIVE — You vs AI, AI vs AI, or head-to-head online.
+   You are always on the RIGHT. The LEFT paddle is the AI, or in Player-vs-
+   Player the remote opponent (each client sees itself on the right).
    Modes: CLASSIC (timed) | CHAOS | SURVIVAL | ENDLESS | ROYALE
    ============================================================ */
 
@@ -55,7 +56,7 @@ const SMASH_CD = 3;          // s cooldown
 const SMASH_MULT = 1.45;     // speed multiplier on a smashed return
 const AI_SMASH_CHANCE = 0.16;
 /* ---------- ball types ---------- */
-// rolled on spawn; each has its own look, behaviour, and point value
+// rolled on spawn; each has its own look, behavior, and point value
 const BALL_TYPES = {
   normal:  { weight: 62 },
   gold:    { weight: 8 },   // 3 pts, big & shiny
@@ -96,11 +97,15 @@ const PORTAL_R = 22;
    The AI uses a standard brain at most levels; RELAXED softens it,
    INSANE sharpens it and occasionally uses arena tricks, and IMPOSSIBLE
    uses a perfect brain.
-   Difficulty changes YOUR handicaps and the game's physics:
+   Difficulty changes YOUR handicaps, the game's physics, and how much of the
+   arena's chaos is switched on:
      paddleScale — your paddle size
      ballSpeed / speedup / maxSpeed — how fast things get
      rallyShrink — your paddle shrinks a bit every time YOU hit
      fog — the ball fades out as it approaches your side
+     flicker / inverted — IMPOSSIBLE-only curses on your paddle and controls
+     events — which field events can spawn (portals / well / wind)
+     powerups — which pickups are in the spawn pool for this tier
 ---------------------------------------------------------------- */
 const AI_CFG = {
   speed: 390,          // max paddle px/s
@@ -146,7 +151,7 @@ const customSettings = {
   fog: false,
   flicker: false,
   inverted: false,
-  aiPerfect: false,
+  aiSkill: 'standard', // chill | standard | sharp | perfect
   barrier: false,      // closing + breathing zone walls (royale-style)
   // special ball types allowed to spawn (normal always spawns)
   balls: { gold: true, phantom: true, heavy: true, splitter: true, comet: true },
@@ -175,7 +180,14 @@ function buildCustomCfg() {
     fog: customSettings.fog ? { start: 0.45, end: 0.72 } : null,
     flicker: customSettings.flicker,
     inverted: customSettings.inverted ? 12 : 0,
-    aiPerfect: customSettings.aiPerfect,
+    aiSkill: customSettings.aiSkill,
+    // The AI's harshest behaviors (kill-shot aim, guaranteed smashes,
+    // full-charge catches) are keyed off these flags rather than off aiSkill
+    // directly, so each tier switches on exactly one of them.
+    aiPerfect: customSettings.aiSkill === 'perfect',
+    aiSharp: customSettings.aiSkill === 'sharp',
+    aiChill: customSettings.aiSkill === 'chill',
+    aiFieldPlay: customSettings.aiSkill === 'sharp',
     events: {
       portals: customSettings.portals,
       well: customSettings.well,
@@ -204,12 +216,24 @@ const CHILL_BRAIN = {
 const SHARP_BRAIN = {
   speed: 640, lookAhead: 0.75, wobble: 10, lapseChance: 0.06, lapseError: 50,
 };
-// pick the brain a paddle should run: IMPOSSIBLE overrides everything,
-// RELAXED softens the solo opponent (spectator bots keep their personalities)
-const brainFor = (base) =>
-  cfg().aiPerfect ? PERFECT_BRAIN :
-  cfg().aiSharp ? SHARP_BRAIN :
-  (cfg().aiChill && !isAivai()) ? CHILL_BRAIN : base;
+// Named skill tiers, selectable directly on CUSTOM.
+const AI_BRAINS = {
+  chill: CHILL_BRAIN,
+  standard: null,        // null = keep the caller's base brain
+  sharp: SHARP_BRAIN,
+  perfect: PERFECT_BRAIN,
+};
+// pick the brain a paddle should run. CUSTOM names its tier outright; the
+// preset difficulties still express theirs as flags. IMPOSSIBLE overrides
+// everything, RELAXED softens the solo opponent (spectator bots keep their
+// own personalities).
+const brainFor = (base) => {
+  const skill = cfg().aiSkill;
+  if (skill) return AI_BRAINS[skill] || base;
+  return cfg().aiPerfect ? PERFECT_BRAIN :
+    cfg().aiSharp ? SHARP_BRAIN :
+    (cfg().aiChill && !isAivai()) ? CHILL_BRAIN : base;
+};
 
 /* ---------- game modes ---------- */
 const MODES = {
@@ -219,23 +243,36 @@ const MODES = {
   endless:  { timed: false, balls: 1, maxBalls: 4, spawnMin: 4,   spawnVar: 3,   puCap: 3 },
   ffa:      { timed: true,  balls: 4, maxBalls: 10, spawnMin: 1,  spawnVar: 1,   puCap: 7, zone: true, bumpers: 4, rain: 5, movingBumpers: true, mega: true },
 };
-const ZONE_RATE = 16;       // px/s each wall closes in (ROYALE)
-const ZONE_MIN_H = 170;     // arena never shrinks below this
-const ZONE_BREATHE = 55;    // breathing amplitude (px)
-const ZONE_DRIFT = 90;      // px the safe corridor wanders off-centre
+/* Barriers should apply real pressure. The corridor closes quickly enough to
+   change how a rally is played, settles narrow enough that position actually
+   matters, and keeps moving once it is there — a static tunnel stops being a
+   hazard and just becomes the new arena.
+
+   The floor is deliberately a little under two paddle-heights: tight enough to
+   punish poor positioning, wide enough that a ball can still be returned. */
+const ZONE_RATE = 14;       // px/s each wall closes in (ROYALE)
+const ZONE_MIN_H = 190;     // minimum playable corridor height (~2 paddles)
+const ZONE_BREATHE = 34;    // corridor widens and narrows as it moves (px)
+const ZONE_BREATHE_SPEED = 0.9;  // rad/s of the breathing cycle
+const ZONE_DRIFT = 88;      // px the safe corridor wanders off-center
+const ZONE_DRIFT_SPEED = 0.5;    // rad/s of the wander
+/* How much of the barrier's progress survives a goal. Rallies are short next to
+   the closing time, so a full reset made the closed corridor unreachable; this
+   eases the walls back out without discarding the pressure entirely. */
+const ZONE_GOAL_RELIEF = 0.55;
 const HARD_BALL_CAP = 16;   // absolute max balls, mega included
 
 /* ---------- power-ups ---------- */
 const POWERUP_TYPES = {
-  grow:   { color: '#4dff88', label: '+',  name: 'BIG PADDLE' },
-  shrink: { color: '#ff5a5a', label: '-',  name: 'SHRINK FOE' },
-  multi:  { color: '#ffd950', label: '×2', name: 'MULTIBALL'  },
-  mega:   { color: '#ff8c1a', label: '×8', name: 'BALL STORM' },
-  slow:   { color: '#b06bff', label: '~',  name: 'SLOW-MO'    },
-  ghost:  { color: '#9aecff', label: '‖',  name: 'GHOST PADDLE' },
-  charge: { color: '#ffe14d', label: '◎',  name: 'CATCH ZONE'  },
-  heart:  { color: '#ff4f9a', label: '♥',  name: 'EXTRA LIFE' },
-  flip:   { color: '#ff9ee8', label: '↔',  name: 'FLIP' }, 
+  grow:   { color: '#6fbf73', label: '+',  name: 'BIG PADDLE' },
+  shrink: { color: '#cf5a4e', label: '-',  name: 'SHRINK FOE' },
+  multi:  { color: '#d9a441', label: '×2', name: 'MULTIBALL'  },
+  mega:   { color: '#d2803a', label: '×8', name: 'BALL STORM' },
+  slow:   { color: '#8f76c8', label: '~',  name: 'SLOW-MO'    },
+  ghost:  { color: '#93b8cf', label: '‖',  name: 'GHOST PADDLE' },
+  charge: { color: '#e3c15a', label: '◎',  name: 'CATCH ZONE'  },
+  heart:  { color: '#d2647f', label: '♥',  name: 'EXTRA LIFE' },
+  flip:   { color: '#c98bbf', label: '↔',  name: 'FLIP' }, 
 };
 /* catch zone: for a window, paddles CATCH the ball, charge it up, and
    release it at boosted speed. Everyone — humans, AI, bots — can use it. */
@@ -317,7 +354,7 @@ const player = {
   noise: 0, noiseT: 0, noiseTarget: 0,
   lapse: 0, watching: null,
 };
-// AI on the LEFT
+// LEFT paddle: the AI, or the remote player in PvP
 const ai = {
   x: PADDLE_MARGIN,
   y: H / 2 - BASE_PADDLE_H / 2,
@@ -370,47 +407,264 @@ const powerups = [];
 const popups = [];   // floating score/event text
 const ripples = []; // expanding rings (wall taps, goals, portal use)
 
-/* Presentation events queued for a networked guest. Only the host simulates,
-   so effects spawned here must be replayed on the other client. The queue and
-   role helpers live in net.js, which loads after this file. */
-function netEmit(kind, data) {
-  // net.js loads later, so tolerate effects fired before it is evaluated.
-  if (typeof isNetHost !== 'function' || !isNetHost()) return;
-  if (typeof netEvents !== 'undefined') netEvents.push({ k: kind, ...data });
-}
+/* Presentation helpers.
 
+   In PvP the SERVER runs these same functions while simulating and records what
+   they produced, shipping the result in its snapshots; clients replay that
+   list. So there is nothing to forward from here — a client only ever draws its
+   own local effects. */
 function ripple(x, y, color, maxR = 60, width = 3) {
   ripples.push({ x, y, color, r: 6, maxR, width, life: 1 });
-  netEmit('ripple', { x, y, c: color, r: maxR, w: width });
 }
 
 function popup(x, y, str, color, size = 14) {
   popups.push({ x, y, str, color, size, life: 1.1 });
-  netEmit('popup', { x, y, s: str, c: color, z: size });
 }
 
-// decor: twinkling starfield (generated once)
+// decor: background starfield, generated once and then never moved.
+// Each star needs only a position, because they all render as identical flat
+// 2px squares (see the starfield loop in render.js).
 const stars = [];
 for (let i = 0; i < 70; i++) {
   stars.push({
     x: Math.random() * W,
     y: Math.random() * H,
-    r: 0.5 + Math.random() * 1.4,
-    phase: Math.random() * Math.PI * 2,
-    speed: 0.5 + Math.random() * 1.5,
   });
 }
 
 /* ============================================================
-   Audio (WebAudio, no assets)
+   Audio
+
+   Sampled one-shots for the main beats; WebAudio tones still cover the
+   incidental cues that have no sample. Samples are decoded once and played
+   through the same AudioContext so muting and autoplay unlocking behave
+   identically for both.
    ============================================================ */
 let audioCtx = null;
-function beep(freq, dur = 0.06, type = 'square', vol = 0.12) {
-  if (state.muted) return;
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// `wet` is how much of each sound is sent to the shared reverb: rally sounds
+// stay fairly dry so fast exchanges don't smear, while goals and fanfares get
+// a longer tail for weight.
+const SAMPLES = {
+  bounce:  { src: 'audio/bounce.mp3',  vol: 0.22, wet: 0.18 },  // ball meets a wall
+  click:   { src: 'audio/click.mp3',   vol: 0.26, wet: 0.12 },  // major UI action
+  hithigh: { src: 'audio/hithigh.mp3', vol: 0.26, wet: 0.22 },  // paddle contact, upper half
+  hitlow:  { src: 'audio/hitlow.mp3',  vol: 0.26, wet: 0.22 },  // paddle contact, lower half
+  scored:  { src: 'audio/scored.mp3',  vol: 0.34, wet: 0.40 },
+  start:   { src: 'audio/start.mp3',   vol: 0.34, wet: 0.35 },  // countdown finishes
+  win:     { src: 'audio/win.mp3',     vol: 0.38, wet: 0.45 },
+  lose:    { src: 'audio/lose.mp3',    vol: 0.34, wet: 0.45 },
+  // Power-up pickup. The source file is long and hot, so it is played quietly
+  // and cut short: pickups can land back-to-back in Chaos/Royale and a full
+  // 3.4s tail would stack into a wall of noise.
+  // Plays in full: the sample decays naturally, so no trim or fade is needed.
+  modifier: { src: 'audio/modifier.mp3', vol: 0.20, wet: 0.30 },
+};
+const sampleBuffers = {};
+// 'pending' while a sample is still downloading/decoding, 'failed' if it never
+// arrives. Only 'failed' falls back to a synthesized tone: a sample that is
+// merely pending will arrive shortly, and falling back for it would make the
+// first sound of a session a beep instead of the real audio.
+const sampleState = {};
+// Playback requested before the buffer finished decoding, replayed on arrival.
+const pendingPlays = {};
+// Long samples that should not overlap themselves (see playSample).
+const activeLongSounds = new Map();
+
+/* Reverb bus. Every sound plays dry into the destination and also feeds a
+   shared convolver, so the arena has a consistent sense of space. The impulse
+   response is generated (decaying filtered noise) rather than shipped as an
+   asset — cheap, and it keeps the game dependency-free. */
+const REVERB_SECONDS = 1.5;
+const REVERB_DECAY = 3.2;      // higher = tighter tail
+let reverbBus = null;
+
+function buildImpulseResponse(ctx) {
+  const rate = ctx.sampleRate;
+  const length = Math.floor(rate * REVERB_SECONDS);
+  const impulse = ctx.createBuffer(2, length, rate);
+  for (let channel = 0; channel < 2; channel++) {
+    const data = impulse.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      // Exponentially decaying noise: dense early reflections, smooth tail.
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, REVERB_DECAY);
+    }
+  }
+  return impulse;
+}
+
+function ensureReverb(ctx) {
+  if (reverbBus) return reverbBus;
+  const convolver = ctx.createConvolver();
+  convolver.buffer = buildImpulseResponse(ctx);
+  // Roll off the highs so the tail sits behind the dry hit instead of hissing.
+  const damp = ctx.createBiquadFilter();
+  damp.type = 'lowpass';
+  damp.frequency.value = 3200;
+  const wet = ctx.createGain();
+  wet.gain.value = 1;
+  convolver.connect(damp).connect(wet).connect(ctx.destination);
+  reverbBus = { input: convolver, wet };
+  return reverbBus;
+}
+
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    decodePendingSamples();
+  }
   // Browsers start the context suspended until a user gesture. The guest may
   // not have clicked the canvas, so resume on the first sound it needs to play.
   if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+/* Fetch every sample once, at startup. Decoding needs an AudioContext, which
+   browsers only allow after a user gesture, so the encoded bytes are fetched
+   immediately and decoded as soon as a context exists. Without this the very
+   first sound of a session (usually START MATCH) fires before anything has
+   decoded and falls back to the synthesized beep. */
+let samplesRequested = false;
+const encodedSamples = {};
+
+function fetchSamples() {
+  if (samplesRequested) return;
+  samplesRequested = true;
+  for (const [name, { src }] of Object.entries(SAMPLES)) {
+    sampleState[name] = 'pending';
+    fetch(src)
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(bytes => { encodedSamples[name] = bytes; decodeSample(name); })
+      .catch(err => {
+        sampleState[name] = 'failed';
+        debugLog('game', `AUDIO: could not load ${src}`, { error: err.message });
+      });
+  }
+}
+
+function decodeSample(name) {
+  const bytes = encodedSamples[name];
+  if (!bytes || sampleBuffers[name]) return;
+  // Decoding needs a context, but it does NOT need an unlocked one, so this can
+  // run before any user gesture and be ready for the very first sound.
+  const ctx = audioCtx || (audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+  delete encodedSamples[name];   // decodeAudioData detaches the buffer
+  ctx.decodeAudioData(bytes)
+    .then(decoded => {
+      sampleBuffers[name] = decoded;
+      sampleState[name] = 'ready';
+      // Play a request that arrived while this was still decoding, unless it
+      // waited so long the moment has passed.
+      const queued = pendingPlays[name];
+      delete pendingPlays[name];
+      if (!queued || performance.now() - queued.at > 400) return;
+      if (ctx.state === 'running') startSample(ctx, name, queued);
+      else ctx.resume().then(() => startSample(ctx, name, queued)).catch(() => {});
+    })
+    .catch(err => {
+      sampleState[name] = 'failed';
+      debugLog('game', `AUDIO: could not decode ${name}`, { error: err.message });
+    });
+}
+
+// Decode anything already downloaded as soon as a context is available.
+function decodePendingSamples() {
+  for (const name of Object.keys(encodedSamples)) decodeSample(name);
+}
+
+fetchSamples();
+
+// Playback rate with a random spread, optionally biased upward. Used to keep
+// repeated one-shots from sounding mechanically identical.
+const randRate = (spread, bias = 0) => 1 + bias + (Math.random() * 2 - 1) * spread;
+
+// Returns false when the sample is unavailable, so callers can fall back to a
+// synthesized tone instead of playing nothing at all.
+/* Public entry point. Returns false ONLY when the sample can never play, so a
+   caller's synthesized fallback is used for genuine failures and never for a
+   sound that is merely still loading or waiting on the audio hardware. */
+function playSample(name, opts = {}) {
+  if (state.muted) return true;   // muted is "handled", not a failure
+  if (sampleState[name] === 'failed') return false;
+
+  const ctx = ensureAudioCtx();
+  decodeSample(name);
+
+  if (!sampleBuffers[name]) {
+    // Still downloading/decoding: play it the moment it is ready.
+    pendingPlays[name] = { ...opts, at: performance.now() };
+    return true;
+  }
+
+  if (ctx.state === 'running') {
+    startSample(ctx, name, opts);
+  } else {
+    // First sound of the session: the context is suspended and resume() is
+    // async, so a source started now is silent. Play once the resume lands.
+    ctx.resume().then(() => startSample(ctx, name, opts))
+      .catch(err => debugLog('game', `AUDIO: resume failed for ${name}`, { error: err.message }));
+  }
+  return true;
+}
+
+// Builds the graph and starts the sound. Assumes the context is running and
+// the buffer is decoded; callers above guarantee both.
+function startSample(ctx, name, { rate = 1, gain = 1 } = {}) {
+  const buffer = sampleBuffers[name];
+  if (!buffer) return;
+  const cfgSample = SAMPLES[name] || {};
+  const source = ctx.createBufferSource();
+  const amp = ctx.createGain();
+  source.buffer = buffer;
+  source.playbackRate.value = rate;
+  const level = (cfgSample.vol ?? 0.6) * gain;
+  amp.gain.value = level;
+  source.connect(amp).connect(ctx.destination);
+
+  const wetAmount = cfgSample.wet ?? 0;
+  if (wetAmount > 0) {
+    const send = ctx.createGain();
+    send.gain.value = level * wetAmount;
+    amp.connect(send).connect(ensureReverb(ctx).input);
+  }
+
+  const now = ctx.currentTime;
+  source.start(now);
+
+  // Optionally shorten an over-long sample. Loudness is perceived roughly
+  // logarithmically, so a linear ramp sounds like it drops out abruptly near
+  // the end — an exponential decay reads as a natural tail instead.
+  if (cfgSample.maxDur) {
+    const fade = cfgSample.fade ?? 0.2;
+    const stopAt = now + cfgSample.maxDur;
+    const fadeFrom = Math.max(now, stopAt - fade);
+    amp.gain.setValueAtTime(level, fadeFrom);
+    amp.gain.exponentialRampToValueAtTime(level * 0.0001, stopAt);
+    // Stop a touch late so the ramp completes before the source is cut.
+    source.stop(stopAt + 0.02);
+  }
+
+  // Long one-shots retrigger constantly during power-up rushes; keep only the
+  // newest so they replace rather than pile up.
+  if (cfgSample.maxDur || buffer.duration > 1.5) {
+    activeLongSounds.get(name)?.();
+    activeLongSounds.set(name, () => {
+      try { source.stop(); } catch { /* already stopped */ }
+    });
+    source.onended = () => {
+      if (activeLongSounds.get(name)) activeLongSounds.delete(name);
+    };
+  }
+
+  return true;
+}
+
+// Global trim on the synthesized cues so they sit at the same level as the
+// samples instead of poking out above them.
+const BEEP_TRIM = 0.45;
+function beep(freq, dur = 0.06, type = 'square', vol = 0.12) {
+  if (state.muted) return;
+  vol *= BEEP_TRIM;
+  ensureAudioCtx();
   const t = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
@@ -419,13 +673,36 @@ function beep(freq, dur = 0.06, type = 'square', vol = 0.12) {
   gain.gain.setValueAtTime(vol, t);
   gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   osc.connect(gain).connect(audioCtx.destination);
+  // Light send so synthesized cues share the same room as the samples.
+  const send = audioCtx.createGain();
+  send.gain.setValueAtTime(vol * 0.22, t);
+  send.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  gain.connect(send).connect(ensureReverb(audioCtx).input);
   osc.start(t);
   osc.stop(t + dur);
 }
 const sfx = {
-  paddle: () => beep(430 + Math.min(state.rally, 20) * 14 + Math.random() * 40, 0.05),
-  wall:   () => beep(260, 0.05),
-  power:  () => { beep(660, 0.06); setTimeout(() => beep(990, 0.09), 60); },
+  // Paddle contact: the sample is chosen by where the ball struck the arena, so
+  // high and low returns sound different. If samples are unavailable, this
+  // falls back to a synthesized tone that rises with the rally.
+  paddle: (relY = null) => {
+    const high = relY === null
+      ? Math.random() < 0.5
+      : relY < (topWall() + botWall()) / 2;
+    // Small random detune plus a gentle rise over the rally: repeated hits stay
+    // distinct instead of sounding like one looping sample.
+    const rally = Math.min(state.rally, 20) / 20;
+    if (playSample(high ? 'hithigh' : 'hitlow', { rate: randRate(0.06, rally * 0.10) })) return;
+    beep(430 + Math.min(state.rally, 20) * 14 + Math.random() * 40, 0.05);
+  },
+  wall:   () => { if (!playSample('bounce', { rate: randRate(0.07) })) beep(260, 0.05); },
+  // Major action: starting a match, returning to the menu, menu confirmations.
+  click:  () => { if (!playSample('click')) beep(660, 0.05, 'square', 0.1); },
+  // Ball collects a power-up / modifier.
+  power:  () => {
+    if (playSample('modifier', { rate: randRate(0.04) })) return;
+    beep(660, 0.06); setTimeout(() => beep(990, 0.09), 60);
+  },
   life:   () => { beep(311, 0.1, 'sawtooth', 0.1); setTimeout(() => beep(233, 0.18, 'sawtooth', 0.1), 100); },
   // proper goal horns — loud enough to land over the shake and particles.
   // In high-scoring chaos (royale etc.) rapid goals fall back to a short
@@ -435,6 +712,11 @@ const sfx = {
     const now = performance.now();
     const rapid = now - sfx._lastGoalAt < 2500;
     sfx._lastGoalAt = now;
+    // One goal sample for both sides; conceding is pitched down so the two are
+    // still tellable apart at a glance. Rapid goals stay quiet and short.
+    // Keep the scored/conceded pitch gap, but vary each one slightly.
+    const goalRate = (isFor ? 1 : 0.82) * randRate(0.03);
+    if (playSample('scored', { rate: goalRate, gain: rapid ? 0.55 : 1 })) return;
     if (rapid) {
       // compact version: one note, still directional (high = for, low = against)
       beep(isFor ? 784 : 220, 0.07, isFor ? 'triangle' : 'sine', 0.07);
@@ -452,9 +734,16 @@ const sfx = {
   scoreFor:     () => sfx._goalSound(true),
   scoreAgainst: () => sfx._goalSound(false),
   count:  () => beep(392, 0.07),
-  go:     () => beep(784, 0.15),
-  win:    () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.1), i * 130)),
-  lose:   () => [392, 330, 262, 196].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'sawtooth', 0.08), i * 150)),
+  // Countdown reaching zero, meaning the round actually starts.
+  go:     () => { if (!playSample('start')) beep(784, 0.15); },
+  win:    () => {
+    if (playSample('win')) return;
+    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.1), i * 130));
+  },
+  lose:   () => {
+    if (playSample('lose')) return;
+    [392, 330, 262, 196].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'sawtooth', 0.08), i * 150));
+  },
 };
 
 /* ============================================================
@@ -476,7 +765,34 @@ function spawnParticles(x, y, color, n = 14, power = 260) {
       size: 1.5 + Math.random() * 2.5,
     });
   }
-  netEmit('particles', { x, y, c: color, n, p: power });
+}
+
+/* Directional burst: particles fly along `angle` within a cone rather than
+   radiating evenly. Smash launches and paddle impact sparks both need this.
+
+   It exists as a named helper, rather than pushing into `particles` inline,
+   because that array is client-only presentation. In PvP the server runs this
+   same code and records the effects it produces, so anything written straight
+   into `particles` is invisible to the other player — which is exactly why the
+   smash trail never appeared online. */
+function spawnBurst(x, y, color, {
+  n = 12, angle = 0, spread = 0.65, power = 260, powerVar = 180,
+  life = 0.18, lifeVar = 0.14, maxLife = 0.32, size = 1.5, sizeVar = 2,
+  altColor = null, altEvery = 3,
+} = {}) {
+  for (let i = 0; i < n; i++) {
+    const a = angle + (Math.random() - 0.5) * spread;
+    const s = power + Math.random() * powerVar;
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life: life + Math.random() * lifeVar,
+      maxLife,
+      color: (altColor && i % altEvery === 0) ? altColor : color,
+      size: size + Math.random() * sizeVar,
+    });
+  }
 }
 
 function baseBallSpeed() {
@@ -491,7 +807,9 @@ const isAivai = () => state.opponent === 'aivai';
 const debugParticipant = (who) => isAivai()
   ? (who === 'ai' ? 'LEFT AI' : 'RIGHT AI')
   : (who === 'ai' ? 'AI' : 'PLAYER');
-const foeName = () => isAivai() ? 'PINK' : (state.opponent === 'pvp' ? 'PLAYER' : 'AI');
+// In AI-vs-AI both sides are bots, so the left one is named by its color;
+// that name follows the palette rather than a baked-in 'PINK'.
+const foeName = () => isAivai() ? theme.left.name : (state.opponent === 'pvp' ? 'PLAYER' : 'AI');
 
 // per-match bot personalities (AI vs AI) — jittered so the fight isn't a mirror
 const aiBrains = { left: { ...AI_CFG }, right: { ...AI_CFG } };
@@ -542,9 +860,18 @@ function phantomAlpha(b) {
 function paddleHeight(p) {
   if (p.ghost) return BASE_PADDLE_H * GHOST_SCALE;
   let h = BASE_PADDLE_H;
-  // in 2P / AI-vs-AI both sides get the difficulty handicaps (fair fight)
-  // in 2P / AI-vs-AI both sides get the difficulty handicaps (fair fight)
-  if (p === player || isAivai()) h *= cfg().paddleScale * (p === player ? p.rallyScale : 1);
+  /* Difficulty handicaps shrink the HUMAN's paddle, so against the AI only the
+     right-hand paddle is scaled. When both paddles are driven by people — PvP,
+     or AI-vs-AI — the handicap has to apply to both or the match is not a fair
+     fight: on hard the host would play with a 63px paddle against the guest's
+     90px, and on impossible 36px against 90px.
+
+     rallyScale (paddle wear over a long rally) is tracked per-paddle and only
+     ever set on `player`, so it stays keyed to that side. */
+  const bothSidesHandicapped = isAivai() || isPvp();
+  if (p === player || bothSidesHandicapped) {
+    h *= cfg().paddleScale * (p === player ? p.rallyScale : 1);
+  }
   if (p.growT > 0) h *= 1.55;
   if (p.shrinkT > 0) h *= 0.6;
   return h;
@@ -618,9 +945,23 @@ function serve(direction) {
   player.catchT = ai.catchT = 0;
   player.catchThreat = ai.catchThreat = null;
   player.catchAttempted = ai.catchAttempted = false;
-  state.zoneTop = 0;
-  state.zoneBottom = H;
-  state.zoneT = 0;
+  /* The barrier does NOT fully reset on a goal.
+
+     Rallies average a few seconds while the corridor takes considerably longer
+     to close, so wiping its progress every point meant players effectively
+     never saw it shut — the modifier looked slow and toothless because its
+     interesting state was unreachable. Winding the clock back partway gives the
+     arena breathing room after a goal while letting pressure build over the
+     course of a match.
+
+     ROYALE resets nothing: its whole identity is a relentlessly closing arena.
+     replenishBalls() deliberately leaves the zone untouched mid-fight. */
+  state.zoneT = mode().zone ? state.zoneT : state.zoneT * ZONE_GOAL_RELIEF;
+  if (!zoneActive()) {
+    state.zoneTop = 0;
+    state.zoneBottom = H;
+    state.zoneT = 0;
+  }
   state.rainTimer = mode().rain || 0;
   state.invertT = 0;
   state.invertTimer = (cfg().inverted || 12) * (0.7 + Math.random() * 0.6);
@@ -645,7 +986,7 @@ function serve(direction) {
   sfx.count();
 }
 
-// ROYALE: balls depleted mid-fight — respawn at centre and keep rolling.
+// ROYALE: balls depleted mid-fight — respawn at center and keep rolling.
 // Zone, bumpers, portals and arena state all stay exactly where they were.
 function replenishBalls(direction) {
   const midY = (topWall() + botWall()) / 2;
@@ -673,9 +1014,9 @@ function score(who, y, pts = 1) {
   state.rally = 0;
   state.comboPunch = 0;
   player.rallyScale = 1;
-  spawnParticles(who === 'player' ? 20 : W - 20, y, who === 'player' ? '#35e0ff' : '#ff4f9a', 26, 380);
+  spawnParticles(who === 'player' ? 20 : W - 20, y, who === 'player' ? theme.right.base : theme.left.base, 26, 380);
   if (pts > 1) {
-    popup(who === 'player' ? 70 : W - 70, y, `+${pts}!`, '#ffd950', 22);
+    popup(who === 'player' ? 70 : W - 70, y, `+${pts}!`, '#d9a441', 22);
     state.shake = 14;
   }
 
@@ -687,7 +1028,7 @@ function score(who, y, pts = 1) {
       // scoring on the AI wins a life back
       if (state.lives < SURVIVAL_LIVES) {
         state.lives++;
-        popup(W / 2, y, '+1 LIFE!', '#ff4f9a', 16);
+        popup(W / 2, y, '+1 LIFE!', '#d2647f', 16);
         sfx.life();
       }
     } else {
@@ -707,7 +1048,12 @@ function score(who, y, pts = 1) {
   return false;
 }
 
-function endMatch() {
+function endMatch({ fromNetwork = false } = {}) {
+  // Local simulation can reach multiple end conditions on the same frame. Do
+  // not replay the result fanfare (especially the lose sample) after the game
+  // is already over. A guest receives `over` in its authoritative snapshot,
+  // so it explicitly opts into the one required presentation pass.
+  if (state.mode === 'over' && !fromNetwork) return;
   state.mode = 'over';
   const p = state.scores.player, a = state.scores.ai;
   debugLog('game', 'MATCH OVER', {
@@ -721,8 +1067,7 @@ function endMatch() {
     const t = Math.floor(state.survivalTime);
     const m = Math.floor(t / 60), s = String(t % 60).padStart(2, '0');
     title.textContent = 'GAME OVER';
-    title.style.color = '#ffd950';
-    title.style.textShadow = '0 0 12px #ffd950, 0 0 40px rgba(255,217,80,.4)';
+    title.style.color = '#e0a33e';
     scoreEl.textContent = `SURVIVED ${m}:${s}  —  ${p} POINT${p === 1 ? '' : 'S'}`;
     sfx.lose();
     show('gameover');
@@ -730,12 +1075,10 @@ function endMatch() {
   }
 
   if (isAivai()) {
-    const winnerIsCyan = p > a;
-    title.textContent = winnerIsCyan ? 'CYAN WINS!' : 'PINK WINS!';
-    title.style.color = winnerIsCyan ? '#35e0ff' : '#ff4f9a';
-    title.style.textShadow = winnerIsCyan
-      ? '0 0 12px #35e0ff, 0 0 40px rgba(53,224,255,.4)'
-      : '0 0 12px #ff4f9a, 0 0 40px rgba(255,79,154,.4)';
+    const winnerIsRight = p > a;
+    const winner = winnerIsRight ? theme.right : theme.left;
+    title.textContent = `${winner.name} WINS!`;
+    title.style.color = winner.base;
     sfx.win();
     scoreEl.textContent = `${a} — ${p}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');
     show('gameover');
@@ -744,13 +1087,11 @@ function endMatch() {
 
   if (p > a) {
     title.textContent = 'YOU WIN!';
-    title.style.color = '#35e0ff';
-    title.style.textShadow = '0 0 12px #35e0ff, 0 0 40px rgba(53,224,255,.4)';
+    title.style.color = theme.right.base;
     sfx.win();
   } else {
     title.textContent = state.opponent === 'pvp' ? 'PLAYER WINS' : 'AI WINS';
-    title.style.color = '#ff4f9a';
-    title.style.textShadow = '0 0 12px #ff4f9a, 0 0 40px rgba(255,79,154,.4)';
+    title.style.color = theme.left.base;
     sfx.lose();
   }
   scoreEl.textContent = `${p} — ${a}` + (state.suddenDeath ? '  (SUDDEN DEATH)' : '');

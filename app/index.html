@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PONG</title>
+  <title>PONGETITIVE</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <!-- Loading screen: pure inline styles so it renders before the CSS/font arrive -->
-  <div id="loading" style="position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:#0a0a12;font-family:monospace">
-    <div style="font-size:34px;letter-spacing:14px;padding-left:14px;color:#e8f7ff;text-shadow:0 0 14px #35e0ff;font-family:'Press Start 2P',monospace">PONG</div>
-    <canvas id="loading-anim" width="260" height="80" style="width:260px;height:80px;border:2px solid #1e2537"></canvas>
+  <div id="loading" style="position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:#06080f;font-family:monospace">
+    <!-- var() with a literal fallback: this paints before style.css and
+         theme.js are available, so it starts on the default accent and picks up
+         the player's chosen color as soon as they load. -->
+    <div style="font-size:22px;letter-spacing:6px;padding-left:6px;color:var(--accent, #3fa294);font-family:'Press Start 2P',monospace">PONGETITIVE</div>
+    <canvas id="loading-anim" width="260" height="80" style="width:260px;height:80px;background:#0b0e18;border:2px solid #35415f"></canvas>
   </div>
 
   <div id="game-wrapper">
@@ -25,7 +28,7 @@
 
     <!-- Main menu overlay -->
     <div id="menu" class="overlay visible">
-      <h1 class="title">PONG</h1>
+      <h1 class="title">PONGETITIVE</h1>
 
       <div class="tabs">
         <button class="tab selected" data-tab="play">PLAY</button>
@@ -36,12 +39,30 @@
       <div class="tab-page" id="tab-play">
       <p class="subtitle" id="mode-desc">Timed match &mdash; most points when time runs out wins</p>
 
+      <div class="option-group match-choice" id="color-group">
+        <span class="option-label">COLORS</span>
+        <!-- Laid out to match the arena: the opponent holds the left side of
+             the field, you hold the right, so their cards sit the same way.
+             This is DOM order rather than a CSS reversal so that keyboard and
+             screen-reader order stays identical to what is on screen. -->
+        <div class="color-sides">
+          <div class="color-side">
+            <span class="color-side-label" id="color-foe-label">OPPONENT</span>
+            <div class="swatches" id="color-left-options" role="radiogroup" aria-label="Opponent color"></div>
+          </div>
+          <div class="color-side">
+            <span class="color-side-label" id="color-you-label">YOU</span>
+            <div class="swatches" id="color-right-options" role="radiogroup" aria-label="Your color"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="option-group match-choice" id="opponent-group">
         <span class="option-label">OPPONENT</span>
         <div class="options" id="opponent-options">
-          <button class="opt selected" data-value="ai">VS AI</button>
+          <button class="opt selected" data-value="ai">PLAYER VS AI</button>
           <button class="opt" data-value="aivai">AI VS AI</button>
-          <button class="opt" data-value="pvp" style="--c:#7dffb8">PLAYER VS PLAYER</button>
+          <button class="opt" data-value="pvp" style="--c:#7fc7a0">PLAYER VS PLAYER</button>
         </div>
         <div class="room-panel" id="room-panel" hidden>
           <div class="room-actions" id="room-actions">
@@ -89,17 +110,17 @@
       <section class="difficulty-panel preset-locked" id="difficulty-panel" aria-label="Difficulty settings">
         <span class="option-label">DIFFICULTY</span>
         <div class="difficulty-tabs" id="difficulty-options" role="tablist">
-          <button class="opt" data-value="relaxed" style="--c:#7dffb8">RELAXED</button>
+          <button class="opt" data-value="relaxed" style="--c:#7fc7a0">RELAXED</button>
           <button class="opt" data-value="easy">EASY</button>
           <button class="opt selected" data-value="normal">NORMAL</button>
           <button class="opt" data-value="hard">HARD</button>
           <button class="opt" data-value="insane">INSANE</button>
-          <button class="opt" data-value="impossible" style="--c:#ff3355">IMPOSSIBLE</button>
-          <button class="opt" data-value="custom" style="--c:#ffd950">CUSTOM</button>
+          <button class="opt" data-value="impossible" style="--c:#c2453f">IMPOSSIBLE</button>
+          <button class="opt" data-value="custom" style="--c:#d9a441">CUSTOM</button>
         </div>
 
         <div class="difficulty-settings" id="difficulty-settings">
-        <div class="option-group compact-choice">
+        <div class="option-group">
           <span class="option-label">YOUR PADDLE</span>
           <div class="options" id="c-paddle-options">
             <button class="opt" data-value="big">BIG</button>
@@ -108,7 +129,7 @@
             <button class="opt" data-value="tiny">TINY</button>
           </div>
         </div>
-        <div class="option-group compact-choice">
+        <div class="option-group">
           <span class="option-label">BALL SPEED</span>
           <div class="options" id="c-speed-options">
             <button class="opt" data-value="slow">SLOW</button>
@@ -117,46 +138,55 @@
             <button class="opt" data-value="ludicrous">LUDICROUS</button>
           </div>
         </div>
+        <!-- Every difficulty category is the same card width; this one simply grows downward for its extra controls. -->
         <div class="option-group">
-          <span class="option-label">CURSES</span>
-          <div class="options" id="c-curse-options">
-            <button class="opt toggle" data-value="wear" style="--c:#ff9950">PADDLE WEAR</button>
-            <button class="opt toggle" data-value="fog" style="--c:#8899bb">FOG</button>
-            <button class="opt toggle" data-value="flicker" style="--c:#9aecff">PADDLE PHASE</button>
-            <button class="opt toggle" data-value="inverted" style="--c:#ff5a5a">INVERSION</button>
-            <button class="opt toggle" data-value="barrier" style="--c:#ff8f6a">BARRIER</button>
-            <button class="opt toggle" data-value="aiPerfect" style="--c:#ff3355">PERFECT AI</button>
+          <span class="option-label">POWER-UPS</span>
+          <div class="options" id="c-powerup-options">
+            <button class="opt toggle selected" data-value="grow" style="--c:#6fbf73"><span aria-hidden="true">＋</span> BIG</button>
+            <button class="opt toggle selected" data-value="shrink" style="--c:#cf5a4e"><span aria-hidden="true">−</span> SHRINK</button>
+            <button class="opt toggle selected" data-value="multi" style="--c:#d9a441"><span aria-hidden="true">×2</span> MULTI</button>
+            <button class="opt toggle selected" data-value="mega" style="--c:#d2803a"><span aria-hidden="true">×8</span> STORM</button>
+            <button class="opt toggle selected" data-value="slow" style="--c:#8f76c8"><span aria-hidden="true">~</span> SLOW</button>
+            <button class="opt toggle selected" data-value="ghost" style="--c:#93b8cf"><span aria-hidden="true">‖</span> GHOST</button>
+            <button class="opt toggle selected" data-value="charge" style="--c:#e3c15a"><span aria-hidden="true">◎</span> CATCH</button>
+            <button class="opt toggle selected" data-value="flip" style="--c:#c98bbf"><span aria-hidden="true">↔</span> FLIP</button>
           </div>
         </div>
         <div class="option-group">
           <span class="option-label">SPECIAL BALLS</span>
           <div class="options" id="c-ball-options">
-            <button class="opt toggle selected" data-value="gold" style="--c:#ffd950">GOLD</button>
-            <button class="opt toggle selected" data-value="phantom" style="--c:#be9fff">PHANTOM</button>
-            <button class="opt toggle selected" data-value="heavy" style="--c:#aebdd4">HEAVY</button>
-            <button class="opt toggle selected" data-value="splitter" style="--c:#66ff8c">SPLITTER</button>
-            <button class="opt toggle selected" data-value="comet" style="--c:#78dcff">COMET</button>
+            <button class="opt toggle selected" data-value="gold" style="--c:#d9a441"><span aria-hidden="true">●</span> GOLD</button>
+            <button class="opt toggle selected" data-value="phantom" style="--c:#a99bd0"><span aria-hidden="true">◌</span> PHANTOM</button>
+            <button class="opt toggle selected" data-value="heavy" style="--c:#aebdd4"><span aria-hidden="true">⬤</span> HEAVY</button>
+            <button class="opt toggle selected" data-value="splitter" style="--c:#7cc98a"><span aria-hidden="true">●●</span> SPLITTER</button>
+            <button class="opt toggle selected" data-value="comet" style="--c:#79b4cf"><span aria-hidden="true">☄</span> COMET</button>
           </div>
         </div>
         <div class="option-group">
-          <span class="option-label">POWER-UPS</span>
-          <div class="options" id="c-powerup-options">
-            <button class="opt toggle selected" data-value="grow" style="--c:#4dff88">BIG PADDLE</button>
-            <button class="opt toggle selected" data-value="shrink" style="--c:#ff5a5a">SHRINK FOE</button>
-            <button class="opt toggle selected" data-value="multi" style="--c:#ffd950">MULTIBALL</button>
-            <button class="opt toggle selected" data-value="mega" style="--c:#ff8c1a">BALL STORM</button>
-            <button class="opt toggle selected" data-value="slow" style="--c:#b06bff">SLOW-MO</button>
-            <button class="opt toggle selected" data-value="ghost" style="--c:#9aecff">GHOST PADDLE</button>
-            <button class="opt toggle selected" data-value="charge" style="--c:#ffe14d">CATCH ZONE</button>
-            <button class="opt toggle selected" data-value="flip" style="--c:#ff9ee8">FLIP</button>
+          <span class="option-label">CURSES</span>
+          <div class="options" id="c-curse-options">
+            <button class="opt toggle" data-value="wear" style="--c:#cf8a52"><span aria-hidden="true">▥</span> WEAR</button>
+            <button class="opt toggle" data-value="fog" style="--c:#8899bb"><span aria-hidden="true">≋</span> FOG</button>
+            <button class="opt toggle" data-value="flicker" style="--c:#93b8cf"><span aria-hidden="true">◫</span> PHASE</button>
+            <button class="opt toggle" data-value="inverted" style="--c:#cf5a4e"><span aria-hidden="true">↕</span> INVERT</button>
+            <button class="opt toggle" data-value="barrier" style="--c:#cf8a6a"><span aria-hidden="true">▰</span> BARRIER</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <span class="option-label">AI SKILL</span>
+          <div class="options" id="c-ai-options">
+            <button class="opt" data-value="chill" style="--c:#7fc7a0">CHILL</button>
+            <button class="opt selected" data-value="standard">STANDARD</button>
+            <button class="opt" data-value="sharp" style="--c:#d9a441">SHARP</button>
+            <button class="opt" data-value="perfect" style="--c:#c2453f">PERFECT</button>
           </div>
         </div>
         <div class="option-group">
           <span class="option-label">FIELD EVENTS</span>
           <div class="options" id="c-field-options">
-            <button class="opt toggle selected" data-value="portals" style="--c:#35ffc8">PORTALS</button>
-            <button class="opt toggle selected" data-value="well" style="--c:#c46bff">GRAVITY WELL</button>
-            <button class="opt toggle selected" data-value="wind" style="--c:#9fd8ff">WIND</button>
+            <button class="opt toggle selected" data-value="portals" style="--c:#4fb59b"><span aria-hidden="true">◉</span> PORTALS</button>
+            <button class="opt toggle selected" data-value="well" style="--c:#9a72c4"><span aria-hidden="true">◎</span> WELL</button>
+            <button class="opt toggle selected" data-value="wind" style="--c:#9fbdd6"><span aria-hidden="true">≋</span> WIND</button>
           </div>
         </div>
         </div>
@@ -198,7 +228,7 @@
             <li><strong>Slow-mo:</strong> slows all balls.</li>
             <li><strong>Ghost paddle:</strong> adds an AI helper on your side.</li>
             <li><strong>Catch Zone:</strong> enables catching, aiming, and charged shots.</li>
-            <li><strong>Flip:</strong> a 3-second warning, then the arena swaps sides for 10 seconds. The final 3 seconds count down before switching back. Scores and controls stay yours; pauses freeze the timer. Extra Flip pickups do not restart it.</li>
+            <li><strong>Flip:</strong> a 3-second warning, then the arena swaps sides for 10 seconds. The final 3 seconds count down before switching back. Scores and controls stay yours. Extra Flip pickups do not restart it.</li>
           </ul>
         </details>
         <details class="info-section">
@@ -227,9 +257,19 @@
             <li><strong>Relaxed:</strong> bigger paddle, slower ball, gentler solo AI.</li>
             <li><strong>Easy / Normal:</strong> standard play; Easy gives more room to react.</li>
             <li><strong>Hard:</strong> smaller paddle, faster ball, paddle wear and fog.</li>
-            <li><strong>Insane:</strong> stronger handicaps, wilder ball swerves, and a razor-sharp AI that smashes often.</li>
+            <li><strong>Insane:</strong> stronger handicaps and a razor-sharp AI that smashes often and turns wells and portals against you.</li>
             <li><strong>Impossible:</strong> adds perfect AI, paddle flicker and inverted controls.</li>
-            <li><strong>Custom:</strong> choose physics, curses, balls, power-ups and events. Barrier adds closing arena walls.</li>
+            <li><strong>Custom:</strong> choose physics, AI skill, curses, balls, power-ups and events. Barrier adds closing arena walls.</li>
+            <li>Higher tiers also unlock more of the arena: field events and the trickier power-ups only appear as difficulty rises.</li>
+          </ul>
+        </details>
+        <details class="info-section">
+          <summary>PLAYER VS PLAYER</summary>
+          <ul class="controls-hint">
+            <li>Pick <strong>Player vs Player</strong> under Opponent, then create a room or join one with a code.</li>
+            <li>The host owns the match settings and starts the game; the guest's options stay locked.</li>
+            <li>Both players always see themselves on the right.</li>
+            <li>Pausing only opens the menu. The match keeps running for the other player.</li>
           </ul>
         </details>
       </div>
@@ -252,6 +292,7 @@
   </div>
 
   <!-- Classic scripts deliberately share one game runtime; load in dependency order. -->
+  <script src="js/theme.js"></script>
   <script src="js/core.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/gameplay.js"></script>

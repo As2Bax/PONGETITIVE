@@ -31,7 +31,7 @@ function runBrain(pad, facing, brain, dt) {
   pad.h = paddleHeight(pad);
   if (pad.debugBrain !== brain) {
     pad.debugBrain = brain;
-    const label = brain.ruthless ? 'PERFECT' : cfg().aiSharp ? 'SHARP' : cfg().aiChill ? 'CHILL' : 'STANDARD';
+    const label = brain.ruthless ? 'PERFECT' : brain === SHARP_BRAIN ? 'SHARP' : brain === CHILL_BRAIN ? 'CHILL' : 'STANDARD';
     const who = pad === ai ? debugParticipant('ai') : pad === player ? debugParticipant('player') : 'GHOST AI';
     debugLog('ai', `${who} brain: ${label}`, { speed: brain.speed, lookAhead: brain.lookAhead, wobble: brain.wobble });
   }
@@ -110,7 +110,7 @@ function runBrain(pad, facing, brain, dt) {
       target = out ? out.y : mid;
       urgency = 0.9;
     } else {
-      // loosely shadow the rally, drift back toward centre
+      // loosely shadow the rally, drift back toward center
       const b = balls[0];
       target = (b ? mid + (b.y - mid) * 0.4 : mid) + pad.noise;
       urgency = 0.35;

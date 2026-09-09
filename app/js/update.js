@@ -44,7 +44,7 @@ function updateFlip(dt) {
   state.flipTimer = Math.max(0, state.flipTimer - dt);
   const remaining = Math.ceil(state.flipTimer);
   if (remaining > 0 && remaining <= 3 && remaining < before) {
-    popup(W / 2, H / 2, `${state.flipPending ? 'SWAP' : 'SWAP BACK'} IN ${remaining}`, '#ff9ee8', 18);
+    popup(W / 2, H / 2, `${state.flipPending ? 'SWAP' : 'SWAP BACK'} IN ${remaining}`, '#c98bbf', 18);
     sfx.count();
   }
   if (state.flipTimer === 0) {
@@ -53,7 +53,7 @@ function updateFlip(dt) {
     state.flipTimer = state.flipped ? 10 : 0;
     // Re-map the stationary cursor when the arena changes sides.
     if (mouseCX >= 0) mouseCX = W - mouseCX;
-    popup(W / 2, H / 2, state.flipped ? 'SIDES SWAPPED!' : 'SIDES RESTORED!', '#ff9ee8', 18);
+    popup(W / 2, H / 2, state.flipped ? 'SIDES SWAPPED!' : 'SIDES RESTORED!', '#c98bbf', 18);
     sfx.go();
   }
 }
@@ -96,8 +96,7 @@ function update(dt) {
 
   if (state.mode === 'countdown') {
     if (isAivai()) runBrain(player, 1, brainFor(aiBrains.right), dt); else updatePlayer(dt);
-    if (isNetHost()) netDriveRemotePaddle(dt); else updateAI(dt);
-    if (isNetHost()) netSendSnapshot(dt);
+    updateAI(dt);
     countdownTimer += dt;
     if (countdownTimer >= 1) {
       countdownTimer = 0;
@@ -112,17 +111,9 @@ function update(dt) {
     return;
   }
 
-  // The match is over: simulation stops, but the guest still needs to be told,
-  // otherwise its screen freezes on the last play frame with no result.
-  if (state.mode === 'over') {
-    // Force the first frame through so the result isn't delayed by throttling,
-    // then keep ticking normally so a dropped packet can't strand the guest.
-    if (isNetHost()) {
-      netSendSnapshot(dt, !net.sentGameOver);
-      net.sentGameOver = true;
-    }
-    return;
-  }
+  // The match is over: nothing further to simulate. In PvP the result arrives
+  // from the server, which both clients apply in netApplySnapshot.
+  if (state.mode === 'over') return;
 
   if (state.mode !== 'play') return;
 
@@ -134,7 +125,7 @@ function update(dt) {
       const wave = Math.floor(state.survivalTime / WAVE_EVERY) + 1;
       if (wave > state.wave) {
         state.wave = wave;
-        popup(W / 2, H / 2 - 40, `WAVE ${wave}`, '#ffd950', 22);
+        popup(W / 2, H / 2 - 40, `WAVE ${wave}`, '#d9a441', 22);
         state.flash = 0.15;
         beep(392, 0.12, 'square', 0.12);
         setTimeout(() => beep(523, 0.15, 'square', 0.12), 130);
@@ -142,7 +133,7 @@ function update(dt) {
         if (balls.length < mode().maxBalls) {
           const nb = makeBall(W / 2, (topWall() + botWall()) / 2, -1);
           balls.push(nb);
-          spawnParticles(nb.x, nb.y, '#ffd950', 16, 260);
+          spawnParticles(nb.x, nb.y, '#d9a441', 16, 260);
         }
         // waves 3+: bumpers start appearing (drifting, up to a cap)
         if (wave >= 3 && state.bumpers.length < WAVE_MAX_BUMPERS) {
@@ -185,30 +176,27 @@ function update(dt) {
     }
   }
 
-  // ROYALE (or the BARRIER curse): the arena walls close in — and BREATHE.
-  // Each wall moves on its own rhythm and the safe corridor WANDERS, so the
-  // squeeze isn't a predictable pinch toward the centre line every time.
+  /* ROYALE (or the BARRIER curse): the walls close in, then keep hunting.
+
+     Once shut the corridor breathes, widening and narrowing, while wandering
+     off-center, so it stays a live hazard instead of settling into a static
+     tunnel the players simply adapt to. Both walls move together so the
+     corridor slides rather than repeatedly squeezing from both sides. */
   if (zoneActive()) {
     state.zoneT += dt;
     const t = state.zoneT;
-    const ramp = Math.min(t / 5, 1); // motion fades in over the first seconds
+    const ramp = Math.min(t / 3, 1); // motion fades in over the first seconds
     const maxHalf = (H - ZONE_MIN_H) / 2;
     const closing = Math.min(ZONE_RATE * t, maxHalf);
-    // layered sines at unrelated frequencies = non-repeating wall rhythms
-    const topBreathe = (Math.sin(t * 1.2) * 0.7 + Math.sin(t * 0.53 + 1.7) * 0.3) * ZONE_BREATHE * ramp;
-    const botBreathe = (Math.sin(t * 0.9 + 4.2) * 0.7 + Math.sin(t * 0.71 + 0.6) * 0.3) * ZONE_BREATHE * ramp;
-    // the corridor itself slowly drifts up and down the arena
-    const drift = Math.sin(t * 0.35 + 2.1) * ZONE_DRIFT * ramp;
-    let top = clamp(closing + topBreathe + drift, 0, H - ZONE_MIN_H);
-    let bottom = clamp(H - (closing + botBreathe - drift), ZONE_MIN_H, H);
-    // never let the corridor collapse below the guaranteed safe height
-    if (bottom - top < ZONE_MIN_H) {
-      const mid = (top + bottom) / 2;
-      top = clamp(mid - ZONE_MIN_H / 2, 0, H - ZONE_MIN_H);
-      bottom = top + ZONE_MIN_H;
-    }
+    // Breathing only begins once the walls have finished closing, so the squeeze
+    // reads as deliberate rather than jittery on the way in.
+    const shut = closing >= maxHalf;
+    const breathe = shut ? (Math.sin(t * ZONE_BREATHE_SPEED) * 0.5 + 0.5) * ZONE_BREATHE : 0;
+    const corridorH = Math.min(H, H - closing * 2 + breathe);
+    const drift = Math.sin(t * ZONE_DRIFT_SPEED + 2.1) * ZONE_DRIFT * ramp;
+    const top = clamp((H - corridorH) / 2 + drift, 0, H - corridorH);
     state.zoneTop = top;
-    state.zoneBottom = bottom;
+    state.zoneBottom = top + corridorH;
   }
 
   // ball rain: Chaos/Royale keep pumping extra balls into play
@@ -245,7 +233,7 @@ function update(dt) {
       if (state.invertTimer <= 0) {
         state.invertTimer = cfg().inverted * (0.7 + Math.random() * 0.6);
         state.invertT = INVERT_DURATION;
-        popup(player.x - 60, player.y + player.h / 2, 'INVERTED!', '#ff5a5a', 14);
+        popup(player.x - 60, player.y + player.h / 2, 'INVERTED!', '#cf5a4e', 14);
         beep(196, 0.15, 'sawtooth', 0.14);
       }
     }
@@ -328,7 +316,7 @@ function update(dt) {
         life: WELL_LIFE,
       };
       debugLog('events', 'GRAVITY WELL FORMS', { x: Math.round(state.well.x), y: Math.round(state.well.y) });
-      popup(state.well.x, state.well.y - WELL_R * 0.5, 'GRAVITY WELL', '#c46bff', 12);
+      popup(state.well.x, state.well.y - WELL_R * 0.5, 'GRAVITY WELL', '#9a72c4', 12);
       beep(140, 0.3, 'sine', 0.12);
     }
   }
@@ -345,22 +333,21 @@ function update(dt) {
       state.windLife = WIND_LIFE;
       state.windSpawnT = state.fieldTime;
       debugLog('events', `WIND ${state.wind > 0 ? 'DOWN' : 'UP'}`, { force: Math.round(Math.abs(state.wind)), life: WIND_LIFE });
-      popup(W / 2, H / 2 - 80, state.wind > 0 ? 'WIND ▼' : 'WIND ▲', '#9fd8ff', 13);
+      popup(W / 2, H / 2 - 80, state.wind > 0 ? 'WIND ▼' : 'WIND ▲', '#9fbdd6', 13);
       beep(300, 0.4, 'sine', 0.07);
     }
   }
 
   if (isAivai()) runBrain(player, 1, brainFor(aiBrains.right), dt); else updatePlayer(dt);
-  if (isNetHost()) netDriveRemotePaddle(dt); else updateAI(dt);
-  for (const [gh, facing] of [[ghostL, -1], [ghostR, 1]]) {
+  updateAI(dt);
+  for (const [gh, facing, side] of [[ghostL, -1, theme.left], [ghostR, 1, theme.right]]) {
     if (gh.timer > 0) {
       gh.timer -= dt;
       runBrain(gh, facing, ghostBrain, dt);
-      if (gh.timer <= 0) spawnParticles(gh.x + PADDLE_W / 2, gh.y + gh.h / 2, '#9aecff', 14, 200);
+      if (gh.timer <= 0) spawnParticles(gh.x + PADDLE_W / 2, gh.y + gh.h / 2, side.ghost, 14, 200);
     }
   }
   updatePowerups(dt);
   updateBalls(dt);
-  if (isNetHost()) netSendSnapshot(dt);
 }
 

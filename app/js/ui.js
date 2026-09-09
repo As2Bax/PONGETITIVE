@@ -21,6 +21,26 @@ function byId(id) { return document.getElementById(id); }
 function show(name) {
   Object.values(overlays).forEach(o => o.classList.remove('visible'));
   if (name) overlays[name].classList.add('visible');
+  if (name === 'gameover') syncRematchButton();
+}
+
+/* Only the host can requeue a PvP match, for the same reason only the host can
+   start one: it owns the settings, and both clients must restart together.
+
+   A guest's rematch button therefore has nothing to do, so it is disabled and
+   relabeled rather than left on screen as a control that silently does
+   nothing. The lobby's START MATCH button behaves the same way for a guest. */
+function syncRematchButton() {
+  const btn = byId('rematch-btn');
+  if (!btn) return;
+  const guest = state.opponent === 'pvp' && roomClient.role === 'guest';
+  // A host whose opponent has left cannot requeue either: there is nobody to
+  // play, and the room is gone.
+  const strandedHost = state.opponent === 'pvp' && roomClient.role === 'host' && !roomClient.ready;
+  btn.disabled = guest || strandedHost;
+  btn.textContent = guest ? 'WAITING FOR HOST'
+    : strandedHost ? 'OPPONENT LEFT'
+    : 'REMATCH';
 }
 
 // Manual spectator spawns intentionally override CUSTOM spawn-pool toggles,
@@ -82,8 +102,8 @@ byId('spawn-btn').addEventListener('click', () => {
     };
   }
   status.textContent = `Added ${spawnChoice.selectedOptions[0].textContent.toLowerCase()}.`;
-  spawnParticles(x, y, '#ffd950', 12, 180);
-  sfx.power();
+  spawnParticles(x, y, '#d9a441', 12, 180);
+  sfx.click();   // spectator UI action, not an in-play pickup
   // Remove focus so keyboard navigation cannot accidentally re-trigger a spawn.
   byId('spawn-btn').blur();
 });
@@ -102,9 +122,15 @@ function bindOptions(groupId, apply) {
   });
 }
 const CUSTOM_CONTROL_GROUPS = [
-  'c-paddle-options', 'c-speed-options', 'c-curse-options',
+  'c-paddle-options', 'c-speed-options', 'c-curse-options', 'c-ai-options',
   'c-ball-options', 'c-powerup-options', 'c-field-options',
 ];
+
+// Which AI tier a preset difficulty actually runs, for the read-only summary.
+const presetAiSkill = (settings) =>
+  settings.aiPerfect ? 'perfect' :
+  settings.aiSharp ? 'sharp' :
+  settings.aiChill ? 'chill' : 'standard';
 
 // Presets use the same controls as Custom as a read-only summary. Values that
 // fall between Custom's named size/speed steps use the nearest visible step.
@@ -132,6 +158,7 @@ function syncCustomControls() {
     setControlSelection('c-paddle-options', [customSettings.paddle]);
     setControlSelection('c-speed-options', [customSettings.speed]);
     setControlSelection('c-curse-options', Object.keys(customSettings).filter(key => customSettings[key] === true));
+    setControlSelection('c-ai-options', [customSettings.aiSkill]);
     setControlSelection('c-ball-options', Object.keys(customSettings.balls).filter(key => customSettings.balls[key]));
     setControlSelection('c-powerup-options', Object.keys(customSettings.powerups).filter(key => customSettings.powerups[key]));
     setControlSelection('c-field-options', ['portals', 'well', 'wind'].filter(key => customSettings[key]));
@@ -142,8 +169,9 @@ function syncCustomControls() {
   const settings = cfg();
   setControlSelection('c-paddle-options', [preset.paddle]);
   setControlSelection('c-speed-options', [preset.speed]);
-  setControlSelection('c-curse-options', ['wear', 'fog', 'flicker', 'inverted', 'aiPerfect'].filter(key =>
+  setControlSelection('c-curse-options', ['wear', 'fog', 'flicker', 'inverted'].filter(key =>
     key === 'wear' ? settings.rallyShrink : Boolean(settings[key])));
+  setControlSelection('c-ai-options', [presetAiSkill(settings)]);
   // Presets leave special balls enabled; power-ups and field events scale with
   // difficulty and are shown here as the preset's read-only selection.
   setControlSelection('c-ball-options', Object.keys(BALL_TYPES).filter(key => key !== 'normal'));
@@ -157,6 +185,7 @@ bindOptions('difficulty-options', v => {
   syncCustomControls();
 });
 bindOptions('c-paddle-options', v => { customSettings.paddle = v; buildCustomCfg(); });
+bindOptions('c-ai-options', v => { customSettings.aiSkill = v; buildCustomCfg(); });
 bindOptions('c-speed-options', v => { customSettings.speed = v; buildCustomCfg(); });
 // curse buttons toggle independently (not radio-style)
 byId('c-curse-options').querySelectorAll('.opt').forEach(btn => {
@@ -231,6 +260,9 @@ function showRoomActions() {
 window.addEventListener('pong-room-status', ({ detail }) => {
   roomStatusEl.textContent = detail.message;
   syncRoomUi();
+  // The results overlay can be open when the room state changes, so keep its
+  // button label honest too.
+  syncRematchButton();
 });
 window.addEventListener('pong-room-ended', () => {
   const notice = roomStatusEl.textContent;
@@ -289,7 +321,59 @@ function refreshMenu() {
   // Ball Storm is mode-exclusive, so the read-only difficulty preview must
   // refresh whenever the selected game mode changes.
   syncCustomControls();
+  syncColorPicker();
   syncRoomUi();
+}
+
+/* ---------- side color picker ---------- */
+/* Swatches are built from the palette itself so adding a color to theme.js
+   needs no matching markup here. */
+function buildSwatches(groupId, side) {
+  const group = byId(groupId);
+  for (const entry of PALETTE) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'swatch';
+    btn.dataset.value = entry.key;
+    btn.style.setProperty('--sw', entry.hex);
+    btn.setAttribute('role', 'radio');
+    // The name carries the identity, and the button wears the color itself:
+    // outlined normally, filled once selected. Naming it means the choice never
+    // rests on hue alone.
+    const label = document.createElement('span');
+    label.className = 'swatch-name';
+    label.textContent = entry.name;
+    btn.append(label);
+    btn.addEventListener('click', () => {
+      setSideColor(side, entry.key);
+      syncColorPicker();
+    });
+    group.appendChild(btn);
+  }
+}
+buildSwatches('color-right-options', 'right');
+buildSwatches('color-left-options', 'left');
+
+function syncColorPicker() {
+  for (const [groupId, side] of [['color-right-options', 'right'], ['color-left-options', 'left']]) {
+    const other = side === 'right' ? 'left' : 'right';
+    byId(groupId).querySelectorAll('.swatch').forEach(btn => {
+      const key = btn.dataset.value;
+      const isSelected = theme[side].key === key;
+      const isTaken = theme[other].key === key;
+      btn.classList.toggle('selected', isSelected);
+      btn.classList.toggle('taken', isTaken);
+      btn.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+      // Disabled rather than swapping: the other side already owns this color.
+      btn.disabled = isTaken;
+      btn.title = isTaken ? `${paletteEntry(key).name} is used by the other side` : '';
+    });
+  }
+  // Both sides are bots in AI vs AI, so "YOU" would be a lie; name the sides
+  // by position instead.
+  byId('color-you-label').textContent = isAivai() ? 'RIGHT' : 'YOU';
+  byId('color-foe-label').textContent = isAivai() ? 'LEFT'
+    : state.opponent === 'pvp' ? 'OPPONENT' : 'AI';
 }
 // menu tabs (PLAY / INFO)
 document.querySelectorAll('.tab').forEach(tab => {
@@ -327,7 +411,12 @@ function resetToMenu() {
   balls = [];
   particles.length = powerups.length = popups.length = ripples.length = 0;
   scorePop.player = scorePop.ai = timerPop = countdownTimer = 0;
-  mouseY = null;
+  /* Keep the aim through a PvP transition. The pointer has not actually moved,
+     and clearing it would leave the paddle motionless until the player jiggled
+     the mouse. mouseY is used rather than mouseCY because it stays valid even
+     when the cursor is outside the arena. */
+  const keepAim = state.opponent === 'pvp' && mouseY !== null;
+  if (!keepAim) mouseY = null;
   mouseCX = mouseCY = -1;
   hoveredBadge = null;
   for (const key of Object.keys(keys)) delete keys[key];
@@ -364,6 +453,10 @@ function transitionTo(destination) {
         if (destination === 'match') {
           countdownTimer = 0;
           startMatch();
+          // Local state is now stable, so authoritative snapshots may be
+          // applied again. Until this point they would have been overwritten by
+          // the reset above, leaving the paddle fighting the server.
+          if (typeof netResume === 'function') netResume();
         } else {
           state.mode = 'menu';
         }
@@ -374,20 +467,35 @@ function transitionTo(destination) {
   }, 250);
 }
 window.addEventListener('pong-room-start', () => {
-  if (state.opponent === 'pvp' && state.mode === 'menu') transitionTo('match');
+  if (state.opponent !== 'pvp') return;
+  // A host can requeue while the guest is still on the results overlay. Treat
+  // `over` like the menu and rebuild the field on both clients; otherwise the
+  // guest keeps stale balls/overlays and the next snapshots corrupt the match.
+  if (state.mode === 'menu' || state.mode === 'over') transitionTo('match');
 });
 byId('start-btn').addEventListener('click', () => {
+  sfx.click();
   if (state.opponent === 'pvp') { roomStart(); return; }
   transitionTo('match');
 });
 byId('rematch-btn').addEventListener('click', () => {
-  // In PvP only the host may requeue, and both clients restart together.
-  if (state.opponent === 'pvp') { roomStart(); return; }
+  // In PvP only the host may requeue, and both clients restart together. The
+  // button is disabled for a guest, so this is a guard rather than the primary
+  // mechanism. Without it a stray click would play a confirmation sound for an
+  // action that never happens.
+  if (state.opponent === 'pvp') {
+    if (roomClient.role !== 'host') return;
+    sfx.click();
+    roomStart();
+    return;
+  }
+  sfx.click();
   transitionTo('match');
 });
-byId('menu-btn').addEventListener('click', () => transitionTo('menu'));
-byId('resume-btn').addEventListener('click', resume);
+byId('menu-btn').addEventListener('click', () => { sfx.click(); transitionTo('menu'); });
+byId('resume-btn').addEventListener('click', () => { sfx.click(); resume(); });
 byId('quit-btn').addEventListener('click', () => {
+  sfx.click();
   // Leaving mid-match must free the room so the other player isn't stranded.
   if (state.opponent === 'pvp') roomDisconnect();
   transitionTo('menu');
@@ -418,6 +526,12 @@ function resume() {
     state.mode = state.prePause || 'play';
     show(null);
   }
+}
+
+// Create/unlock the AudioContext on the first interaction anywhere, so samples
+// are decoded and ready before the first sound the game actually plays.
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, () => ensureAudioCtx(), { once: true });
 }
 
 window.addEventListener('keydown', (e) => {
@@ -453,26 +567,60 @@ function playerAction() {
 // Left click smashes/releases a held charged ball.
 canvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0 || state.mode !== 'play' || isAivai()) return;
-  // Guests own no simulation: their click is sent to the host instead.
-  if (isNetGuest()) { net.action = true; return; }
+  // Neither client simulates, so the click is sent as a discrete action. The
+  // server queues it and applies it exactly once, which is what makes smash
+  // reliable for both players.
+  if (isNetGuest()) {
+    // Smash timing is too short to wait for the frame-loop input relay, and
+    // netSendInput always flushes a queued action immediately.
+    net.action = true;
+    netSendInput(0);
+    return;
+  }
   playerAction();
 });
 window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-canvas.addEventListener('mousemove', (e) => {
+/* Paddle aiming is tracked on the WINDOW, not the canvas.
+
+   Canvas mouse events stop at its edge, so a pointer that leaves the arena
+   would freeze the paddle at its last inside-the-arena position until the
+   pointer came back. Overshooting vertically while chasing a fast ball is easy,
+   and a frozen paddle reads as a locked-up game.
+
+   Listening on the window keeps the paddle following the cursor's height even
+   while the pointer is outside the arena. The value is clamped, so the paddle
+   sits at the top or bottom rather than aiming somewhere unreachable. */
+window.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
-  mouseY = ((e.clientY - rect.top) / rect.height) * H;
-  const screenX = ((e.clientX - rect.left) / rect.width) * W;
-  mouseCX = state.flipped && state.mode !== 'menu' ? W - screenX : screenX;
-  mouseCY = ((e.clientY - rect.top) / rect.height) * H;
+  if (!rect.height || !rect.width) return;
+  mouseY = clamp(((e.clientY - rect.top) / rect.height) * H, 0, H);
+
+  /* The in-canvas cursor position is a separate concern: it drives badge hover
+     and held-ball aiming, both of which are meaningless once the pointer is off
+     the arena. Those stay canvas-only and reset to -1 outside it. */
+  const insideX = e.clientX >= rect.left && e.clientX <= rect.right;
+  const insideY = e.clientY >= rect.top && e.clientY <= rect.bottom;
+  if (insideX && insideY) {
+    const screenX = ((e.clientX - rect.left) / rect.width) * W;
+    mouseCX = state.flipped && state.mode !== 'menu' ? W - screenX : screenX;
+    mouseCY = ((e.clientY - rect.top) / rect.height) * H;
+  } else {
+    mouseCX = mouseCY = -1;
+  }
+
+  // Nudge the sender so aim goes out as soon as its rate-limit slot opens.
+  // Sending on every mouse event instead would flood the replay buffer with
+  // more inputs than the server has ticks to consume.
+  if (isNetGuest() && state.mode === 'play') netSendInput(0);
 });
-canvas.addEventListener('mouseleave', () => { mouseCX = -1; mouseCY = -1; });
 
 // touch support
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
   const rect = canvas.getBoundingClientRect();
   mouseY = ((e.touches[0].clientY - rect.top) / rect.height) * H;
+  if (isNetGuest() && state.mode === 'play') netSendInput(0);
 }, { passive: false });
 
 window.addEventListener('blur', () => {
@@ -527,7 +675,7 @@ window.addEventListener('blur', () => {
     lball.vx = Math.max(-420, Math.min(420, lball.vx));
     lball.vy = Math.max(-200, Math.min(200, lball.vy));
     // only the paddle the ball is heading toward chases it;
-    // the other relaxes back to centre — no synchronised mirroring
+    // the other relaxes back to center — no synchronized mirroring
     if (lball.vx < 0) {
       lpad.l += (lball.y - lpad.l) * Math.min(1, 10 * dt);
       lpad.r += (LH / 2 - lpad.r) * Math.min(1, 3 * dt);
@@ -537,8 +685,8 @@ window.addEventListener('blur', () => {
     }
 
     lctx.clearRect(0, 0, LW, LH);
-    // single flat colour, hard pixel edges — no glow, no curves
-    lctx.fillStyle = '#35e0ff';
+    // single flat color, hard pixel edges — no glow, no curves
+    lctx.fillStyle = theme.right.base;
     lctx.fillRect(0, lpad.l - PADH / 2, PADW, PADH);
     lctx.fillRect(LW - PADW, lpad.r - PADH / 2, PADW, PADH);
     lctx.beginPath();

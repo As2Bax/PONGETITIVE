@@ -9,4 +9,4 @@ const server = http.createServer((_, res) => {
 });
 
 attachRoomProtocol(server);
-server.listen(PORT, () => console.info(`PONG room server listening on :${PORT}`));
+server.listen(PORT, () => console.info(`PONGETITIVE room server listening on :${PORT}`));

@@ -19,18 +19,22 @@ function updatePlayer(dt) {
     mouseY = null; // keyboard overrides mouse until it moves again
     player.vy += (dir * PLAYER_SPEED - player.vy) * Math.min(1, 16 * dt);
     player.y += player.vy * dt;
-  } else if (mouseY !== null) {
+  } else {
+    const inputY = mouseY;
+    if (inputY === null) {
+      player.vy *= Math.max(0, 1 - 10 * dt);
+      player.y = clamp(player.y, topWall(), botWall() - player.h);
+      return;
+    }
     // smooth exponential follow — no jitter, no teleporting
-    // (inversion curse mirrors the mouse target around centre)
-    const my = state.invertT > 0 ? (topWall() + botWall()) - mouseY : mouseY;
+    // (inversion curse mirrors the mouse target around center)
+    const my = state.invertT > 0 ? (topWall() + botWall()) - inputY : inputY;
     const target = clamp(my - player.h / 2, topWall(), botWall() - player.h);
     player.y += (target - player.y) * Math.min(1, 20 * dt);
-  } else {
-    player.vy *= Math.max(0, 1 - 10 * dt);
   }
   player.y = clamp(player.y, topWall(), botWall() - player.h);
-  // effective velocity (used for curve), works for both mouse & keys.
-  // smoothed so a single jittery frame doesn't decide the curve.
+  // Smoothed paddle velocity, tracked for both mouse & keys. Kept for feel
+  // tuning and debugging; no mechanic reads it since curve was removed.
   const instVy = (player.y - prevY) / Math.max(dt, 1e-4);
   player.smoothVy += (instVy - player.smoothVy) * Math.min(1, 14 * dt);
 }
@@ -53,7 +57,7 @@ function paddleBounce(b, paddle, isPlayer) {
   }
 
   // SMASH: armed paddle rockets the return
-  const paddleColor = isPlayer ? '#35e0ff' : '#ff4f9a';
+  const paddleColor = isPlayer ? theme.right.base : theme.left.base;
   const smashed = paddle.smashT > 0;
   if (smashed) {
     b.speed = Math.min(b.speed * SMASH_MULT, speedCap() * 1.15);
@@ -72,17 +76,14 @@ function paddleBounce(b, paddle, isPlayer) {
     // without lingering on-screen or obscuring the next exchange.
     ripple(b.x, b.y, paddleColor, 62, 3);
     const launchAngle = Math.atan2(b.vy, b.vx);
-    for (let i = 0; i < 14; i++) {
-      const spread = (Math.random() - 0.5) * 0.65;
-      const power = 220 + Math.random() * 180;
-      particles.push({
-        x: b.x, y: b.y,
-        vx: Math.cos(launchAngle + spread) * power,
-        vy: Math.sin(launchAngle + spread) * power,
-        life: 0.18 + Math.random() * 0.14, maxLife: 0.32,
-        color: i % 3 ? paddleColor : '#ffffff', size: 1.5 + Math.random() * 2,
-      });
-    }
+    spawnBurst(b.x, b.y, paddleColor, {
+      n: 14, angle: launchAngle, spread: 0.65,
+      power: 220, powerVar: 180,
+      life: 0.18, lifeVar: 0.14, maxLife: 0.32,
+      size: 1.5, sizeVar: 2,
+      // Every third particle is white, giving the trail a hot core.
+      altColor: '#ffffff', altEvery: 3,
+    });
     debugLog('game', `${debugParticipant(isPlayer ? 'player' : 'ai')} SMASHES`, {
       speed: Math.round(b.speed), direction: Math.round(launchAngle * 180 / Math.PI),
     });
@@ -103,14 +104,14 @@ function paddleBounce(b, paddle, isPlayer) {
     beep(Math.min(freq, 4200), 0.09, 'triangle', 0.14);
     if (stepIdx === 0 && octave > 0) {
       setTimeout(() => beep(Math.min(freq * 2, 5000), 0.12, 'sine', 0.12), 60);
-      popup(W / 2, H / 2 - 40, `COMBO ×${lvl}`, '#ffd950', 16);
+      popup(W / 2, H / 2 - 40, `COMBO ×${lvl}`, '#d9a441', 16);
     }
   }
   // hard/insane: your paddle wears down over a rally (not in spectator mode, not ghosts)
   if (paddle === player && cfg().rallyShrink && !isAivai()) {
     player.rallyScale = Math.max(RALLY_SHRINK_MIN, player.rallyScale - RALLY_SHRINK_STEP);
   }
-  sfx.paddle();
+  sfx.paddle(b.y);   // contact height picks the high/low hit sample
   state.shake = b.type === 'heavy' ? 10 : 4;
   if (b.type === 'heavy') beep(110, 0.1, 'sawtooth', 0.14); // thud
   paddle.hitFlash = 1;
@@ -126,23 +127,19 @@ function paddleBounce(b, paddle, isPlayer) {
     twin.vy = -b.vy * 0.8 + (Math.random() - 0.5) * 120;
     twin.lastHit = b.lastHit;
     balls.push(twin);
-    popup(b.x, b.y - 22, 'SPLIT!', '#66ff8c', 13);
+    popup(b.x, b.y - 22, 'SPLIT!', '#7cc98a', 13);
     beep(700, 0.06, 'square', 0.12);
     setTimeout(() => beep(940, 0.08, 'square', 0.12), 60);
-    spawnParticles(b.x, b.y, '#66ff8c', 16, 260);
+    spawnParticles(b.x, b.y, '#7cc98a', 16, 260);
   }
-  spawnParticles(b.x, b.y, isPlayer ? '#35e0ff' : '#ff4f9a', 10, 200);
+  spawnParticles(b.x, b.y, isPlayer ? theme.right.base : theme.left.base, 10, 200);
   // directional impact sparks flying off the contact edge
-  for (let i = 0; i < 6; i++) {
-    const a2 = (isPlayer ? Math.PI : 0) + (Math.random() - 0.5) * 1.2;
-    const s2 = 180 + Math.random() * 240;
-    particles.push({
-      x: b.x, y: b.y,
-      vx: Math.cos(a2) * s2, vy: Math.sin(a2) * s2,
-      life: 0.25 + Math.random() * 0.15, maxLife: 0.4,
-      color: '#ffffff', size: 1 + Math.random() * 1.5,
-    });
-  }
+  spawnBurst(b.x, b.y, '#ffffff', {
+    n: 6, angle: isPlayer ? Math.PI : 0, spread: 1.2,
+    power: 180, powerVar: 240,
+    life: 0.25, lifeVar: 0.15, maxLife: 0.4,
+    size: 1, sizeVar: 1.5,
+  });
   pickAiAim(); // both sides re-roll where they'll aim next
 }
 
@@ -163,9 +160,9 @@ function releaseBall(b) {
   b.lastHit = who;
   pad.hitFlash = 1;
   state.shake = 6 + chargeFrac * 8;
-  popup(b.x, b.y - 22, chargeFrac >= 0.99 ? 'FULL CHARGE!' : 'RELEASE!', '#ffe14d', chargeFrac >= 0.99 ? 16 : 12);
+  popup(b.x, b.y - 22, chargeFrac >= 0.99 ? 'FULL CHARGE!' : 'RELEASE!', '#e3c15a', chargeFrac >= 0.99 ? 16 : 12);
   beep(180 + chargeFrac * 120, 0.14, 'sawtooth', 0.12 + chargeFrac * 0.06);
-  spawnParticles(b.x, b.y, '#ffe14d', 10 + Math.round(chargeFrac * 14), 220 + chargeFrac * 180);
+  spawnParticles(b.x, b.y, '#e3c15a', 10 + Math.round(chargeFrac * 14), 220 + chargeFrac * 180);
 }
 
 // Lightweight tactical shot search, not a perfect physics solver. Sample
@@ -200,7 +197,7 @@ function chooseBotShot(b, who) {
     // passing ABOVE bends it DOWN — pick the side with room for the curve:
     //   well sits low  -> skim below, the bend lifts the ball clear
     //   well sits high -> skim above, the bend dives it down
-    //   well centred   -> free choice; bend away from the foe's paddle
+    //   well centered   -> free choice; bend away from the foe's paddle
     if (state.well && state.well.life > 1 && direction * (state.well.x - b.x) > 60) {
       const skim = 26; // px off-core: close enough to whip, too fast to capture
       const span = botWall() - topWall();
@@ -304,7 +301,7 @@ function catchBall(b, pad, who) {
   pad.catchT = pad.smashT = 0;
   b.aimThinkT = 0;
   b.targetAngle = 0;
-  popup(b.x, b.y - 24, 'CAUGHT!', '#ffe14d', 10);
+  popup(b.x, b.y - 24, 'CAUGHT!', '#e3c15a', 10);
 }
 
 function updateBalls(dt) {
@@ -331,7 +328,10 @@ function updateBalls(dt) {
         b.chargeBeepT = 0.12;
         beep(300 + clamp(b.holdT / CHARGE_MAX, 0, 1) * 700, 0.06, 'sine', 0.08);
       }
-      const isBot = b.heldBy === 'ai' || isAivai();
+      /* Who aims a held ball. The LEFT paddle is a bot in single-player, but a
+         remote human in PvP, and auto-aiming their catch would take the shot
+         out of their hands. In AI-vs-AI both sides are bots. */
+      const isBot = isAivai() || (b.heldBy === 'ai' && !isPvp());
       if (isBot) {
         b.aimThinkT -= dt;
         if (b.aimThinkT <= 0) {
@@ -347,7 +347,12 @@ function updateBalls(dt) {
           mouseY = null;
           b.aimAngle = clamp(b.aimAngle + dir * dt * 1.8, -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
         } else if (mouseY !== null) {
-          b.aimAngle = clamp(Math.atan2(mouseY - b.y, Math.max(60, Math.abs(mouseCX - b.x))), -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
+          /* Horizontal reach for the aim triangle. mouseCX is -1 whenever the
+             cursor is outside the arena, which would read as a very distant
+             pointer and flatten the shot; fall back to a fixed lead so aiming
+             stays as responsive off-canvas as the paddle itself. */
+          const reach = mouseCX >= 0 ? Math.abs(mouseCX - b.x) : 200;
+          b.aimAngle = clamp(Math.atan2(mouseY - b.y, Math.max(60, reach)), -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
         }
       }
       if (b.holdT >= CHARGE_HOLD_LIMIT || (isBot && b.holdT >= b.holdPlan)) releaseBall(b);
@@ -356,7 +361,7 @@ function updateBalls(dt) {
     if (b.catchCD > 0) b.catchCD -= dt;
 
     // gravity well STEERS the ball toward its core. The turn rate scales
-    // with ball speed, making the *curvature per pixel travelled* constant:
+    // with ball speed, making the *curvature per pixel traveled* constant:
     // a fast ball bends (and flips!) along the same geometric arc a slow
     // one does — speed buys you nothing, the well doesn't care how fast
     // you're going when it decides to turn you around.
@@ -427,12 +432,12 @@ function updateBalls(dt) {
         if (sp > speedCap()) { b.vx *= speedCap() / sp; b.vy *= speedCap() / sp; }
         bp.pulse = 1;
         beep(620 + Math.random() * 120, 0.05, 'triangle', 0.12);
-        spawnParticles(b.x, b.y, '#ffd950', 8, 180);
+        spawnParticles(b.x, b.y, '#d9a441', 8, 180);
       }
     }
 
     // Swept collision. A fast ball can cross the paddle plane entirely within
-    // one frame, so test the whole path it travelled this frame, and evaluate
+    // one frame, so test the whole path it traveled this frame, and evaluate
     // the vertical overlap at the moment it crossed the plane rather than at
     // its post-move position (a fast diagonal otherwise slips past).
     const stepX = b.vx * slow * dt, stepY = b.vy * slow * dt;
@@ -453,7 +458,7 @@ function updateBalls(dt) {
       b.x = ai.x + PADDLE_W + b.r;
       if (state.chargeWindow > 0 && ai.catchT > 0 && b.catchCD <= 0 && !paddleHolds('ai')) {
         catchBall(b, ai, 'ai');
-        popup(b.x + 24, b.y, 'CAUGHT!', '#ffe14d', 11);
+        popup(b.x + 24, b.y, 'CAUGHT!', '#e3c15a', 11);
       } else {
         paddleBounce(b, ai, false);
       }
@@ -470,7 +475,7 @@ function updateBalls(dt) {
       b.x = player.x - b.r;
       if (state.chargeWindow > 0 && player.catchT > 0 && b.catchCD <= 0 && !paddleHolds('player')) {
         catchBall(b, player, 'player');
-        popup(b.x - 24, b.y, 'CAUGHT!', '#ffe14d', 11);
+        popup(b.x - 24, b.y, 'CAUGHT!', '#e3c15a', 11);
       } else {
         paddleBounce(b, player, true);
       }
@@ -511,13 +516,13 @@ function updateBalls(dt) {
       for (const [from, to] of [[state.portals.a, state.portals.b], [state.portals.b, state.portals.a]]) {
         const dx = b.x - from.x, dy = b.y - from.y;
         if (dx * dx + dy * dy < PORTAL_R * PORTAL_R) {
-          spawnParticles(b.x, b.y, '#35ffc8', 12, 220);
-          ripple(from.x, from.y, '#35ffc8', 46, 3);
-          ripple(to.x, to.y, '#35ffc8', 46, 3);
+          spawnParticles(b.x, b.y, '#4fb59b', 12, 220);
+          ripple(from.x, from.y, '#4fb59b', 46, 3);
+          ripple(to.x, to.y, '#4fb59b', 46, 3);
           b.x = to.x; b.y = to.y;
           b.portalCD = 0.5;
           beep(1040, 0.08, 'sine', 0.14);
-          spawnParticles(b.x, b.y, '#35ffc8', 12, 220);
+          spawnParticles(b.x, b.y, '#4fb59b', 12, 220);
           break;
         }
       }
@@ -531,7 +536,7 @@ function updateBalls(dt) {
     if (scored) {
       // goal shockwave at the point of exit
       ripple(scored === 'player' ? 4 : W - 4, b.y,
-             scored === 'player' ? '#35e0ff' : '#ff4f9a', 110, 5);
+             scored === 'player' ? theme.right.base : theme.left.base, 110, 5);
       const over = score(scored, b.y, ballValue(b));
       if (over) return;
       balls.splice(bi, 1);

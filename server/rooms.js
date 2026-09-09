@@ -9,7 +9,8 @@ function createCode() {
 export function createRoom(host) {
   let code;
   do { code = createCode(); } while (rooms.has(code));
-  const room = { code, host, guest: null };
+  // `match` holds the authoritative simulation once the host starts play.
+  const room = { code, host, guest: null, match: null };
   rooms.set(code, room);
   return room;
 }
@@ -35,8 +36,11 @@ export function removeSocket(socket) {
   const room = roomForSocket(socket);
   if (!room) return null;
   const other = room.host === socket ? room.guest : room.host;
+  const { match } = room;
+  room.match = null;
   rooms.delete(room.code);
-  return { code: room.code, other };
+  // The caller stops the match: rooms.js stays free of simulation concerns.
+  return { code: room.code, other, match };
 }
 
 export const roomCount = () => rooms.size;

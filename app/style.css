@@ -1,31 +1,46 @@
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
+/* ---------------------------------------------------------------
+   Flat arcade shell.
+
+   The menu and the game canvas are meant to read as one object, so
+   anything added here follows the same rules:
+     - the shell is dark, in the same color family as the canvas
+     - square corners only (no border-radius, anywhere)
+     - no box-shadow, no blur, no gradient fills
+     - depth comes from borders and flat fills, never from lighting
+     - selection = solid block of the accent color
+   --------------------------------------------------------------- */
+
 :root {
-  --bg: #0a0a12;
-  --fg: #e8f7ff;
-  --accent: #35e0ff;
-  --accent2: #ff4f9a;
-  --dim: #5a6a80;
+  --bg: #06080f;          /* shell, one shade under the arena */
+  --arena: #0b0e18;       /* canvas background, mirrored by panels */
+  --panel: #0e1220;
+  --panel-alt: #121728;
+  --fg: #e8eefc;
+  --dim: #6e7c9c;
+  --line: #232c44;        /* resting outline */
+  --line-strong: #35415f; /* hover / active outline */
+  /* Both accents are overwritten at runtime by theme.js from the player's
+     chosen side colors, so the menu always matches the arena. The values
+     here are the defaults and the fallback if scripting is unavailable. */
+  --accent: #3fa294;      /* your side, matching the right paddle */
+  --accent2: #e2603f;     /* their side, matching the left paddle */
+  --on-accent: #06080f;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* slim themed scrollbar — replaces the chunky OS default on small windows */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: #2a3350;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover { background: #35e0ff; }
+::-webkit-scrollbar-thumb { background: var(--line); }
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
 ::-webkit-scrollbar-corner { background: transparent; }
-
-/* Firefox fallback (in case the app folder is ever opened in a browser) */
-* { scrollbar-width: thin; scrollbar-color: #2a3350 transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 
 html, body {
   height: 100%;
-  background: radial-gradient(ellipse at center, #11131f 0%, var(--bg) 70%);
+  background: var(--bg);
   font-family: 'Press Start 2P', monospace;
   color: var(--fg);
   overflow: hidden;
@@ -41,16 +56,15 @@ body {
   position: relative;
   width: min(96vw, calc(96vh * 900 / 560));
   aspect-ratio: 900 / 560;
+  transition: width 300ms ease, margin-bottom 300ms ease;
 }
 
 #game {
   width: 100%;
   height: 100%;
   display: block;
-  border: 2px solid #1e2537;
-  border-radius: 8px;
-  box-shadow: 0 0 40px rgba(53, 224, 255, 0.12), 0 0 120px rgba(255, 79, 154, 0.06);
-  background: #0b0e18;
+  border: 2px solid var(--line-strong);
+  background: var(--arena);
   cursor: default;
 }
 
@@ -59,15 +73,9 @@ body.spectating #game-wrapper {
   width: min(96vw, calc((96vh - 130px) * 900 / 560));
   margin-bottom: 130px;
 }
-#game-wrapper {
-  transition: width 300ms ease, margin-bottom 300ms ease;
-}
-body.spectating #game {
-  box-shadow: 0 0 16px rgba(53, 224, 255, 0.1);
-}
 #spectator-panel {
   position: absolute;
-  top: calc(100% + 24px);
+  top: calc(100% + 20px);
   width: 100%;
   display: flex;
   align-items: center;
@@ -75,11 +83,8 @@ body.spectating #game {
   flex-wrap: wrap;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #62543a;
-  border-top: 3px solid #bfa36b;
-  border-radius: 6px;
-  background: #211e19;
-  box-shadow: none;
+  border: 1px solid var(--line);
+  background: var(--panel);
   font-size: 8px;
 }
 #spectator-panel:not([hidden]) {
@@ -99,13 +104,15 @@ body.spectating #game {
   max-width: 100%;
   padding: 8px;
   color: var(--fg);
-  background: #1a2136;
-  border: 1px solid #3a4666;
+  background: var(--arena);
+  border: 1px solid var(--line);
+  border-radius: 0;
   font: inherit;
 }
-#spawn-status { width: 100%; text-align: center; color: #a5b2c5; line-height: 1.6; }
+#spawn-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#spawn-status { width: 100%; text-align: center; color: var(--dim); line-height: 1.6; }
 
-#spawn-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#spawn-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ---------- overlays ---------- */
 .overlay {
@@ -116,11 +123,11 @@ body.spectating #game {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: rgba(8, 9, 16, 0.86);
+  /* A near-opaque flat wash. The arena stays readable underneath as a
+     silhouette, and nothing is softened or blurred. */
+  background: rgba(6, 8, 15, 0.94);
   padding: 12px;
   overflow-y: auto;
-  backdrop-filter: blur(4px);
-  border-radius: 8px;
   text-align: center;
   z-index: 10;
 }
@@ -131,14 +138,20 @@ body.spectating #game {
   position: fixed;
   inset: 0;
   z-index: 50;
-  border-radius: 0;
 }
 
+/* Sized for the full "PONGETITIVE" wordmark: tighter tracking than a 4-letter
+   title needs, and it wraps instead of overflowing on narrow screens.
+
+   Titles carry your own side color, so the wordmark and PAUSED match the
+   paddle you play. The game-over title is the one exception: endMatch() sets
+   its color inline to the WINNER's side, which overrides this. */
 .title {
-  font-size: clamp(28px, 5vw, 48px);
-  letter-spacing: 12px;
-  color: var(--fg);
-  text-shadow: 0 0 12px var(--accent), 0 0 40px rgba(53, 224, 255, 0.4);
+  font-size: clamp(18px, 3.4vw, 34px);
+  letter-spacing: 5px;
+  color: var(--accent);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .title.small { font-size: clamp(20px, 4vw, 36px); letter-spacing: 6px; }
 
@@ -153,7 +166,7 @@ body.spectating #game {
   gap: 28px;
   width: 70%;
   justify-content: center;
-  border-bottom: 1px solid #2a3350;   /* the divider */
+  border-bottom: 1px solid var(--line);
 }
 
 .tab {
@@ -167,14 +180,14 @@ body.spectating #game {
   margin-bottom: -1px;                /* underline sits on the divider */
   cursor: pointer;
   letter-spacing: 2px;
-  transition: all 0.15s;
+  transition: color 0.12s linear, border-color 0.12s linear;
 }
 .tab:hover { color: var(--fg); }
 .tab.selected {
   color: var(--accent);
   border-bottom-color: var(--accent);
-  text-shadow: 0 0 10px rgba(53, 224, 255, 0.5);
 }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .tab-page {
   display: flex;
@@ -184,7 +197,10 @@ body.spectating #game {
   width: min(820px, 90%);
   max-height: 64%;
   overflow-y: auto;
-  padding: 2px 10px 14px;
+  /* No bottom padding: the sticky launch strip is the last child and must be
+     able to sit flush with the bottom edge. A sticky element cannot move past
+     its container's padding box, so any padding here shows as a gap under it. */
+  padding: 2px 10px 0;
 }
 
 /* Play setup has three clear layers: match basics, difficulty details, launch. */
@@ -197,11 +213,9 @@ body.spectating #game {
   width: 100%;
   gap: 10px;
   padding: 13px 16px;
-  border: 1px solid #222c45;
-  border-radius: 6px;
-  background: rgba(18, 24, 39, 0.45);
+  border: 1px solid var(--line);
+  background: var(--panel);
 }
-#mode-group { border-color: #2a3855; }
 .room-panel {
   display: flex;
   flex-direction: column;
@@ -209,7 +223,7 @@ body.spectating #game {
   gap: 9px;
   width: 100%;
   padding-top: 11px;
-  border-top: 1px solid #315849;
+  border-top: 1px solid var(--line);
 }
 .room-panel[hidden], .room-actions[hidden], .room-join-form[hidden], .room-host-code[hidden] { display: none; }
 .room-actions, .room-join-form {
@@ -227,70 +241,150 @@ body.spectating #game {
 }
 .room-host-code strong {
   padding: 10px 15px;
-  color: #7dffb8;
-  border: 1px solid #3d6e5d;
-  border-radius: 4px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
   letter-spacing: 3px;
-  text-shadow: 0 0 10px rgba(125, 255, 184, 0.35);
 }
 #room-code-input {
   width: 128px;
   max-width: 100%;
   padding: 8px;
   color: var(--fg);
-  background: #101a22;
-  border: 1px solid #3d6e5d;
-  border-radius: 4px;
+  background: var(--arena);
+  border: 1px solid var(--line);
+  border-radius: 0;
   font: inherit;
   font-size: 8px;
   text-align: center;
   text-transform: uppercase;
 }
+#room-code-input::placeholder { color: var(--dim); }
+#room-code-input:focus { outline: none; border-color: var(--accent); }
 .room-status {
   min-height: 12px;
   font-size: 8px;
-  color: #8ba89b;
+  color: var(--dim);
   line-height: 1.6;
 }
 .room-permissions {
   max-width: 500px;
   font-size: 8px;
-  color: #ffd950;
+  color: var(--accent);
   line-height: 1.7;
 }
-#tab-play.pvp-guest-locked > :not(#opponent-group):not(.launch-zone) {
-  opacity: 0.38;
-  filter: saturate(0.3);
+/* A waiting guest cannot change the MATCH settings, which the host owns, so
+   they are dimmed. Side colors are exempt: they are a purely local cosmetic
+   preference that stays live for both players, and dimming a control that
+   still works would misrepresent it as locked. */
+#tab-play.pvp-guest-locked > :not(#opponent-group):not(#color-group):not(.launch-zone) {
+  opacity: 0.3;
 }
 #tab-play.pvp-guest-locked > .launch-zone {
   opacity: 0.5;
 }
-/* Sticky launch strip has a fade behind it, so scrolling content naturally
-   disappears beneath the action instead of ending in an abrupt hard edge. */
+/* Sticky launch strip: a flat plate with a hard top border, so scrolling
+   content passes under a visible edge.
+
+   `bottom: 0` pins it flush to the container's bottom edge. Its own bottom
+   padding provides the breathing room under the button, so the plate itself
+   still reaches the edge and no background shows through beneath it. */
 .launch-zone {
   position: sticky;
-  bottom: -14px;
+  bottom: 0;
   z-index: 2;
   width: 100%;
   display: flex;
   justify-content: center;
-  padding: 30px 0 14px;
-  margin-top: -12px;
-  background: linear-gradient(to bottom, rgba(8, 9, 16, 0), rgba(8, 9, 16, 0.92) 42%, rgba(8, 9, 16, 1));
+  padding: 18px 0 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
 }
 
-.opt:disabled {
-  cursor: default;
+/* ---------- side colors ---------- */
+.color-sides {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
 }
-.opt:disabled:hover {
+.color-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+}
+.color-side-label {
+  font-size: 8px;
+  letter-spacing: 2px;
   color: var(--dim);
-  border-color: #2a3350;
 }
-.opt.toggle:disabled:hover {
-  color: var(--c);
-  border-color: var(--c);
+/* Two columns of named chips. Fixed columns keep every chip the same width, so
+   the longest name (VIOLET) sets the size and none of them jump on selection. */
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  width: 100%;
+}
+/* The button IS the swatch: it wears its own color as an outline, and fills
+   with it once selected. Same language as the power-up and curse toggles.
+   Unselected chips are held at 0.55 so the selected one clearly leads. */
+.swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid var(--sw);
+  border-radius: 0;
+  background: transparent;
+  color: var(--sw);
+  opacity: 0.55;
+  font-family: inherit;
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-align: center;
+  cursor: pointer;
+  transition: color 0.12s linear, background-color 0.12s linear, opacity 0.12s linear;
+}
+.swatch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.swatch:hover:not(:disabled) { opacity: 1; }
+/* Selected fills with the color itself. Every palette entry clears 5.3:1
+   against --on-accent, so the name stays readable on all of them. */
+.swatch.selected {
+  opacity: 1;
+  color: var(--on-accent);
+  background: var(--sw);
+}
+.swatch:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* Owned by the other side. Disabled in the DOM as well, so it cannot be clicked
+   or tabbed to, because the two sides must never share a color. */
+.swatch:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+/* A line through the name says "spoken for" rather than merely "faint", which
+   on its own could be mistaken for a rendering artifact. */
+.swatch:disabled .swatch-name { text-decoration: line-through; }
+.color-hint {
+  font-size: 7px;
+  color: var(--dim);
+  line-height: 1.7;
 }
 
+/* ---------- difficulty ---------- */
 /* Difficulty choices and their settings are one unit: presets show a muted,
    read-only summary; Custom unlocks the same controls in place. */
 .difficulty-panel {
@@ -301,10 +395,9 @@ body.spectating #game {
   flex-shrink: 0;
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #344464;
-  border-radius: 8px;
+  border: 1px solid var(--line);
   padding: 16px 18px 18px;
-  background: linear-gradient(135deg, rgba(21, 29, 48, 0.72), rgba(10, 14, 26, 0.6));
+  background: var(--panel);
 }
 .difficulty-tabs {
   display: flex;
@@ -312,60 +405,115 @@ body.spectating #game {
   flex-wrap: wrap;
   justify-content: center;
   padding: 0 0 14px;
-  border-bottom: 1px solid #344464;
+  border-bottom: 1px solid var(--line);
   width: 100%;
 }
 .difficulty-tabs .opt { padding: 8px 10px; font-size: 8px; }
+/* Fixed, centered three-column card matrix. A grid row is always as tall as
+   its tallest card and `stretch` gives every card in that row the same bottom
+   edge; cards therefore never drift vertically based on their own content.
+   Extra controls add rows inside a card, not a different card position. */
 .difficulty-settings {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 16px 22px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
   width: 100%;
-  transition: opacity 0.18s ease, filter 0.18s ease;
+  transition: opacity 0.18s ease;
 }
-.difficulty-settings .option-group { width: 100%; gap: 9px; }
-.difficulty-settings .option-group:nth-child(n + 3) { grid-column: 1 / -1; }
-.difficulty-settings .options { gap: 7px; }
-.difficulty-settings .opt { padding: 7px 9px; font-size: 8px; }
-.compact-choice .options { gap: 7px; }
-.compact-choice .opt { padding: 8px 10px; font-size: 8px; }
-@media (max-width: 620px) {
+/* Seven cards leaves one final card; put it on the grid's center line. */
+.difficulty-settings .option-group:last-child { grid-column: 2; }
+.difficulty-settings .option-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+}
+.difficulty-settings .option-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--dim);
+  letter-spacing: 2px;
+  /* Compensate for letter-spacing's trailing measured space, so titles land
+     on the actual center line. */
+  margin-right: -2px;
+}
+/* A single two-column control grid is shared by every card. Button count can
+   add rows only; it cannot alter a card's width or its horizontal center. */
+.difficulty-settings .options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+/* Do not let an odd final control become a full-width strip. It occupies one
+   regular button track and is centered on the card. */
+#c-ball-options .opt:last-child:nth-child(odd),
+#c-curse-options .opt:last-child:nth-child(odd),
+#c-field-options .opt:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: calc((100% - 6px) / 2);
+}
+/* Preserve equal card widths as space tightens: 3 → 2 → 1 columns. The
+   unpaired final card remains exactly one normal card wide and centered. */
+@media (max-width: 760px) {
+  .difficulty-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+  .difficulty-settings .option-group:last-child {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc((100% - 12px) / 2);
+    box-sizing: border-box;
+  }
+}
+@media (max-width: 500px) {
   .difficulty-settings { grid-template-columns: 1fr; }
-  .difficulty-settings .option-group:nth-child(n + 3) { grid-column: auto; }
+  .difficulty-settings .option-group:last-child {
+    grid-column: auto;
+    justify-self: stretch;
+    width: auto;
+  }
 }
-.difficulty-panel.preset-locked .difficulty-settings {
-  opacity: 0.35;
-  filter: saturate(0.35);
+.difficulty-settings .opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 7px;
 }
+.difficulty-settings .opt [aria-hidden="true"] {
+  font-family: sans-serif;
+  font-size: 10px;
+  line-height: 1;
+}
+.difficulty-panel.preset-locked .difficulty-settings { opacity: 0.3; }
 
-/* toggles keep their own accent colour; selected = lit up, unselected = dimmed */
-.opt.toggle {
-  opacity: 0.35;
-  filter: saturate(0.4);
-}
-.opt.toggle,
-.opt.toggle:hover {
-  color: var(--c);
-  border-color: var(--c);
-}
-.opt.toggle.selected {
-  opacity: 1;
-  filter: none;
-  color: var(--c);
-  background: rgba(255, 255, 255, 0.07);
-  box-shadow: 0 0 12px currentColor;
-}
-
-#tab-info { width: 88%; gap: 12px; }
+/* ---------- info ---------- */
+/* INFO has no sticky footer, so it restores the bottom padding that #tab-play
+   drops for the launch strip. Without it the last section ends flush against
+   the overlay edge. */
+#tab-info { width: 88%; gap: 12px; padding-bottom: 14px; }
 .info-section {
   width: 100%;
   flex-shrink: 0;
   text-align: left;
   padding: 12px 14px;
-  border: 1px solid #2a3350;
-  border-radius: 6px;
-  background: rgba(10, 14, 26, 0.5);
+  border: 1px solid var(--line);
+  background: var(--panel);
 }
 .info-section summary {
   cursor: pointer;
@@ -373,12 +521,14 @@ body.spectating #game {
   font-size: 9px;
   line-height: 1.8;
 }
+.info-section summary:hover { color: var(--accent); }
 .info-section summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-.info-section .controls-hint { margin-top: 12px; color: #a5b2c5; }
+.info-section .controls-hint { margin-top: 12px; color: var(--dim); }
 .info-section ul, .info-section ol { padding-left: 22px; }
 .info-section li + li { margin-top: 8px; }
 .info-section strong { color: var(--fg); font-weight: normal; }
 
+/* ---------- controls ---------- */
 .option-group {
   display: flex;
   flex-direction: column;
@@ -395,52 +545,84 @@ body.spectating #game {
 .options { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
 
 .opt {
-  /* --c = the button's accent colour; defaults to the global cyan.
-     Colourful buttons (IMPOSSIBLE, CUSTOM, curses…) set --c inline so the
-     selected highlight matches THEIR colour instead of staying blue. */
+  /* --c = this button's accent color. It defaults to the shared accent, and
+     buttons that carry their own identity color (IMPOSSIBLE, CUSTOM, the
+     curse and power-up toggles) set --c inline so that their selected block,
+     hover border and focus ring all use that color. */
   --c: var(--accent);
   font-family: inherit;
   font-size: 10px;
   padding: 10px 14px;
   background: transparent;
   color: var(--dim);
-  border: 1px solid #2a3350;
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 0;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.12s linear, border-color 0.12s linear, background-color 0.12s linear;
 }
-.opt[style*="--c"]:not(.selected) { color: var(--c); border-color: var(--c); }
-.opt:hover { color: var(--fg); border-color: var(--c); }
+.opt[style*="--c"]:not(.selected) { color: var(--c); border-color: var(--line-strong); }
+.opt:hover { color: var(--fg); border-color: var(--c); background: var(--panel-alt); }
+.opt:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+/* Selected state is a solid block of the button's own color. */
 .opt.selected {
-  color: var(--bg);
+  color: var(--on-accent);
   background: var(--c);
   border-color: var(--c);
-  box-shadow: 0 0 14px var(--c);
+}
+.opt.selected:hover { color: var(--on-accent); background: var(--c); }
+
+.opt:disabled { cursor: default; }
+.opt:disabled:hover { color: var(--dim); border-color: var(--line); background: transparent; }
+.opt.toggle:disabled:hover { color: var(--c); border-color: var(--line-strong); background: transparent; }
+.opt.selected:disabled:hover { color: var(--on-accent); background: var(--c); border-color: var(--c); }
+
+/* Toggles keep their own accent color: off = outline only, on = filled. */
+.opt.toggle { opacity: 0.45; }
+.opt.toggle,
+.opt.toggle:hover { color: var(--c); }
+.opt.toggle.selected {
+  opacity: 1;
+  color: var(--on-accent);
+  background: var(--c);
+  border-color: var(--c);
 }
 
 .big-btn {
   font-family: inherit;
   font-size: 13px;
   padding: 16px 34px;
-  color: var(--bg);
+  color: var(--on-accent);
   background: var(--accent);
-  border: none;
-  border-radius: 4px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
   cursor: pointer;
   letter-spacing: 2px;
-  box-shadow: 0 0 18px rgba(53, 224, 255, 0.45);
-  transition: transform 0.12s, box-shadow 0.12s;
+  transition: color 0.12s linear, background-color 0.12s linear, border-color 0.12s linear;
 }
-.big-btn:hover { transform: scale(1.05); box-shadow: 0 0 28px rgba(53, 224, 255, 0.7); }
-.big-btn:active { transform: scale(0.97); }
+/* Hover inverts the block (filled becomes outlined) rather than raising it. */
+.big-btn:hover { color: var(--accent); background: transparent; }
+.big-btn:active { color: var(--on-accent); background: var(--accent); }
+.big-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* A disabled action must look disabled: dimmed, with no hover reaction and a
+   not-allowed cursor. Otherwise it still reads as clickable and doing nothing
+   looks like a bug rather than a rule.
+   Applies to START MATCH and REMATCH while a guest waits on the host. */
+.big-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.big-btn:disabled:hover,
+.big-btn:disabled:active { color: var(--on-accent); background: var(--accent); }
 
 .big-btn.secondary {
   background: transparent;
   color: var(--dim);
-  border: 1px solid #2a3350;
-  box-shadow: none;
+  border-color: var(--line-strong);
 }
-.big-btn.secondary:hover { color: var(--fg); border-color: var(--accent); }
+.big-btn.secondary:hover { color: var(--fg); border-color: var(--fg); background: transparent; }
+.big-btn.secondary:disabled:hover,
+.big-btn.secondary:disabled:active { color: var(--dim); background: transparent; }
 
 .controls-hint {
   font-size: 8px;
@@ -450,9 +632,8 @@ body.spectating #game {
 
 kbd {
   font-family: inherit;
-  background: #1a2136;
-  border: 1px solid #2a3350;
-  border-radius: 3px;
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
   padding: 2px 5px;
   color: var(--fg);
 }

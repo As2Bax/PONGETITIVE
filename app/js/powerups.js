@@ -38,7 +38,7 @@ function applyPowerup(pu, b) {
       if (state.flipTimer <= 0) {
         state.flipPending = true;
         state.flipTimer = 3;
-        popup(W / 2, H / 2, 'SWAP IN 3', '#ff9ee8', 18);
+        popup(W / 2, H / 2, 'SWAP IN 3', '#c98bbf', 18);
         sfx.count();
       }
       break;
@@ -46,7 +46,7 @@ function applyPowerup(pu, b) {
       // any ball touching a heart heals YOU — no stealing, no denial
       if (state.lives < SURVIVAL_LIVES) {
         state.lives++;
-        popup(pu.x, pu.y - 24, '+1 LIFE!', '#ff4f9a', 16);
+        popup(pu.x, pu.y - 24, '+1 LIFE!', '#d2647f', 16);
         sfx.life();
       }
       break;
@@ -56,7 +56,7 @@ function applyPowerup(pu, b) {
     case 'charge':
       state.chargeWindow = CHARGE_WINDOW;
       player.smashT = ai.smashT = 0;
-      popup(pu.x, pu.y - 24, 'CATCH ZONE!', '#ffe14d', 14);
+      popup(pu.x, pu.y - 24, 'CATCH ZONE!', '#e3c15a', 14);
       beep(392, 0.08, 'sine', 0.12);
       setTimeout(() => beep(523, 0.08, 'sine', 0.12), 90);
       setTimeout(() => beep(659, 0.12, 'sine', 0.12), 180);
@@ -68,7 +68,7 @@ function applyPowerup(pu, b) {
       gh.y = clamp(pu.y - gh.h / 2, topWall(), botWall() - gh.h);
       gh.vy = 0;
       gh.watching = null;
-      popup(pu.x, pu.y - 24, 'GHOST!', '#9aecff', 14);
+      popup(pu.x, pu.y - 24, 'GHOST!', '#93b8cf', 14);
       break;
     }
     case 'multi':

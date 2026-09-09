@@ -1,5 +1,8 @@
-export const PORT = Number(process.env.PORT || 8080);
+export const PORT = Number(process.env.PORT || 8280);
 export const ROOM_CODE_LENGTH = 6;
+
+// A match with nobody connected should not keep simulating forever.
+export const MATCH_IDLE_TIMEOUT_MS = 60_000;
 
 /* ---------- security limits ---------- */
 // Largest accepted frame. Snapshots are a few KB at most; anything larger is
