@@ -580,9 +580,14 @@ body.spectating #game-wrapper {
 /* ---------- menu footer ---------- */
 .menu-footer {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
   font-size: 7px;
   line-height: 1;
 }
+.menu-footer small { font-size: inherit; color: var(--dim); opacity: 0.65; }
 .menu-footer a { color: var(--dim); text-decoration: none; }
 .menu-footer a:hover { color: var(--accent); }
 .menu-footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
