@@ -578,28 +578,14 @@ body.spectating #game-wrapper {
 .info-section .steps + .statlist { margin-top: 14px; }
 
 /* ---------- menu footer ---------- */
-/* The tab page owns the vertical space and ends in a sticky launch strip, so
-   the footer is pinned to the overlay's padding box instead of sitting in the
-   centred flow, where the strip would cover it. */
 .menu-footer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 8px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
   font-size: 7px;
   line-height: 1;
-  color: var(--dim);
-  pointer-events: none;   /* only the link itself is interactive */
 }
-.menu-footer > * { pointer-events: auto; }
 .menu-footer a { color: var(--dim); text-decoration: none; }
 .menu-footer a:hover { color: var(--accent); }
 .menu-footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.menu-footer #build-id { opacity: 0.6; }
 
 /* ---------- controls ---------- */
 .option-group {
