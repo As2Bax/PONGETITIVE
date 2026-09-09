@@ -20,5 +20,6 @@ jobs:
               environment:
                 PONG_ALLOWED_ORIGINS: "https://pongetitive.as2bax.dev"
           EOF
+          export COMMIT="$(git rev-parse --short HEAD)"
           docker compose -f docker-compose.yml -f override.yml down
           docker compose -f docker-compose.yml -f override.yml up -d --build

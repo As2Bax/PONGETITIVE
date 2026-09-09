@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+      args:
+        COMMIT: ${COMMIT:-DEV}
     ports:
       - "8280:80"
     depends_on:
