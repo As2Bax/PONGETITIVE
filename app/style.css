@@ -591,6 +591,7 @@ body.spectating #game-wrapper {
 .menu-footer a { color: var(--dim); text-decoration: none; }
 .menu-footer a:hover { color: var(--accent); }
 .menu-footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.menu-footer #build-id::before { content: '\00b7'; margin: 0 4px; }
 
 /* ---------- controls ---------- */
 .option-group {

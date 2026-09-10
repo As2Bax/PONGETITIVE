@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+      args:
+        COMMIT: ${COMMIT:-DEV}
     ports:
       - "8280:80"
     depends_on:
@@ -19,7 +21,7 @@ services:
     expose:
       - "8280"
     environment:
-      PONG_ALLOWED_ORIGINS: "" # Empty = allow all origins, not recommended for production
+      PONG_ALLOWED_ORIGINS: "" # Empty = allow all origins (not recommended for production)
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8280').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s

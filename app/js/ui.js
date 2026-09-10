@@ -415,6 +415,20 @@ bindOptions('opponent-options', v => {
 });
 refreshMenu();
 
+/* Build id in the menu footer.
+
+   The web image rewrites the data-commit attribute at build time. Running from
+   source the attribute is still the literal placeholder, so the markup's "DEV"
+   fallback is left in place rather than showing the placeholder to the player. */
+(function showBuildId() {
+  const el = byId('build-id');
+  if (!el) return;
+  const commit = el.dataset.commit;
+  if (!commit || commit.startsWith('__')) return;
+  el.textContent = commit;
+  el.title = `build ${commit}`;
+})();
+
 function resetToMenu() {
   // In PvP these already hold the host's synced settings, so they must survive
   // the reset rather than being replaced by this client's own defaults.
