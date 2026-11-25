@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/9d41041e-46bf-41fe-9025-24ed5c31b168
 
 ## ⚡ Quick start
 
-### ▶ **[Play PONGETITIVE at pongetitive.as2bax.dev](https://pongetitive.as2bax.dev)** (currently down right now)
+### ▶ **[Play PONGETITIVE at pongetitive.as2bax.dev](https://pongetitive.as2bax.dev)**
 
 Nothing to install; solo, AI-vs-AI, and online rooms all run in the browser.
 
